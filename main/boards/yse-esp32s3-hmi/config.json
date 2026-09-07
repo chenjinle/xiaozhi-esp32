@@ -1,0 +1,15 @@
+{
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "yse-esp32s3-hmi",
+            "sdkconfig_append": [
+                "CONFIG_BOARD_TYPE_YSE_ESP32S3_HMI=y",
+                "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
+                "CONFIG_SPIRAM=y",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/16m.csv\"",
+                "CONFIG_CAMERA_GC0308=y"
+            ]
+        }
+    ]
+}

@@ -112,6 +112,54 @@ v1 的稳定版本为 1.9.2，可以通过 `git checkout v1` 来切换到 v1 版
 
 👉 [新手烧录固件教程](https://ccnphfhqs21z.feishu.cn/wiki/Zpz4wXBtdimBrLk25WdcXzxcnNS)
 
+### 烧录后使用（语音对话与 MCP 控制）
+
+烧录完成后，语音对话与设备控制可以直接使用，无需额外配置：
+
+1. 首次开机先配网（屏幕 / 声波 / BluFi 等方式，按板子提示操作）。
+2. 在 [xiaozhi.me](https://xiaozhi.me) 注册账号并绑定设备（屏幕会显示设备 ID / 激活码）。
+3. 绑定成功后即可直接语音对话，默认使用 Qwen 实时模型。
+
+#### MCP 控制原理
+
+设备通过 MCP（Model Context Protocol）把自身能力暴露给后台，大模型自动发现并调用设备工具：
+
+1. 设备启动后通过 WebSocket / MQTT 连接后台，并在 `hello` 消息中声明支持 MCP。
+2. 后台通过 `initialize` 初始化 MCP 会话，再通过 `tools/list` 获取设备支持的工具列表。
+3. 当用户说出类似"打开继电器"的指令时，大模型理解意图后，通过 `tools/call` 下发调用请求。
+4. 设备执行对应工具（如 GPIO 输出）并返回结果。
+
+以语音控制继电器为例：
+
+```text
+你说："打开继电器"
+→ 语音流上传后台，ASR 转成文字
+→ 大模型理解意图，决定调用设备工具 self.relay.set
+→ 后台下发 MCP 调用：tools/call { name: "self.relay.set", arguments: { "on": true } }
+→ ESP32 拉高继电器 GPIO → 继电器吸合
+→ 设备返回执行结果，大模型语音回复"已打开"
+```
+
+#### 设备端 MCP 工具
+
+不同板子注册的工具不同，具体以板子代码中 `McpServer::AddTool` 注册为准。以 `yse-esp32s3-hmi` 板子为例，内置工具如下：
+
+| 工具名 | 功能 | GPIO |
+|--------|------|------|
+| `self.relay.set` | 继电器开/关 | GPIO15 |
+| `self.fan.set` | 风扇开/关 | GPIO7 |
+| `self.light.set` | WS2812B 彩灯开/关/RGB | GPIO8 |
+| `self.buzzer.set` | 蜂鸣器开/关 | GPIO9 |
+| `self.peripherals.get_status` | 查询外设状态 | - |
+
+所有板子还提供通用工具，如 `self.get_device_status`、`self.audio_speaker.set_volume`、`self.screen.set_brightness`、`self.camera.take_photo` 等。
+
+#### 使用前提
+
+- 硬件接线：继电器等外设需接到板子对应的 GPIO（以板子 `config.h` 为准），并与 ESP32 共地。
+- 后台需支持 MCP：官方 `xiaozhi.me` 服务器已支持，无需额外配置。
+- 云端 MCP（智能家居、HomeAssistant 等）需在后台控制台单独添加 MCP 服务器配置。
+
 ### 开发环境
 
 - Cursor 或 VSCode
