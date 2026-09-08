@@ -151,6 +151,7 @@ v1 的稳定版本为 1.9.2，可以通过 `git checkout v1` 来切换到 v1 版
 | `self.light.set` | WS2812B 彩灯开/关/RGB（四颗灯一起亮） | GPIO8 |
 | `self.light.set_chase` | WS2812B 彩灯走马灯动画（可调颜色/速度） | GPIO8 |
 | `self.buzzer.set` | 蜂鸣器开/关 | GPIO9 |
+| `self.sensor.read_temperature_humidity` | 读取 DHT11 温湿度 | GPIO18 |
 | `self.car.move` | 小车前进/后退/左转/右转/停止 | 见下表 |
 | `self.peripherals.get_status` | 查询外设状态 | - |
 
@@ -168,6 +169,10 @@ WS2812B 彩灯接 GPIO8，灯带前四颗灯一起控制；`self.light.set_chase
 | CH3（右） | GPIO16 | GPIO17 | 右侧电机组（两电机并联） |
 
 > 注意：GPIO3 为 strapping 引脚（仅复位瞬间采样），上电时继电器输入保持高阻即可；GPIO45（VDD_SPI 电压选择）不可使用。当前电机为开关量控制（全速/停止），如需 PWM 调速需将 IN1/IN2 改为 LEDC 输出。
+
+#### DHT11 温湿度传感器
+
+DHT11 数据脚接 **GPIO18**，VCC 接 3.3V，GND 共地。数据脚需 4.7k~10kΩ 上拉电阻到 3.3V（多数 DHT11 模块自带）。语音指令示例："现在温度多少度" / "现在湿度是多少" / "室内温湿度是多少"，大模型会调用 `self.sensor.read_temperature_humidity` 并播报结果。
 
 #### 4G 双网络（Wi-Fi + ML307）
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config.h"
+#include "dht11_sensor.h"
 #include "mcp_server.h"
 #include <driver/gpio.h>
 #include <led_strip.h>
@@ -18,7 +19,8 @@
 //   light:  WS2812B smart LED strip driven through RMT
 //           (on/off + RGB color + chase/marquee animation, all LEDs light together)
 //   buzzer: GPIO on/off output (drives an active buzzer; use PWM if passive)
-//   car:    4-channel motor driver (IN1/IN2 per channel, 8 GPIOs), differential drive
+//   dht11:  temperature & humidity sensor (single-wire)
+//   car:    2-channel motor driver (IN1/IN2 per channel, 4 GPIOs), differential drive
 class YsePeripheralControls {
     struct MotorChannel {
         gpio_num_t in1;
@@ -31,6 +33,7 @@ class YsePeripheralControls {
     bool light_on_ = false;
     bool buzzer_on_ = false;
     led_strip_handle_t light_strip_ = nullptr;
+    Dht11Sensor dht11_{PERIPHERAL_DHT11_GPIO};
 
     // 走马灯（chase）状态，由 MCP 工具设置、后台任务执行
     bool chase_on_ = false;
@@ -274,6 +277,22 @@ public:
                 Check(gpio_set_level(PERIPHERAL_BUZZER_GPIO, on ? 1 : 0));
                 buzzer_on_ = on;
                 return true;
+            });
+
+        mcp.AddTool("self.sensor.read_temperature_humidity",
+            "Read the ambient temperature and humidity from the DHT11 sensor. "
+            "Returns a JSON object with \"temperature\" in Celsius and \"humidity\" in percent.",
+            PropertyList(), [this](const PropertyList&) -> ReturnValue {
+                float temperature = 0.0f;
+                float humidity = 0.0f;
+                cJSON* result = cJSON_CreateObject();
+                if (dht11_.Read(temperature, humidity)) {
+                    cJSON_AddNumberToObject(result, "temperature", temperature);
+                    cJSON_AddNumberToObject(result, "humidity", humidity);
+                } else {
+                    cJSON_AddBoolToObject(result, "error", true);
+                }
+                return result;
             });
 
         mcp.AddTool("self.peripherals.get_status",

@@ -82,6 +82,7 @@
 #define PERIPHERAL_LIGHT_GPIO     GPIO_NUM_8
 #define PERIPHERAL_LIGHT_LED_COUNT 4
 #define PERIPHERAL_BUZZER_GPIO    GPIO_NUM_9
+#define PERIPHERAL_DHT11_GPIO     GPIO_NUM_18
 
 // Car motor driver: 2 channels, 2 IOs each (IN1/IN2), 4 IOs total.
 // Reuses the idle camera pins (camera is disabled on this board).
