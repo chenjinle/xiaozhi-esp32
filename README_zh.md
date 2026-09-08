@@ -146,7 +146,7 @@ v1 的稳定版本为 1.9.2，可以通过 `git checkout v1` 来切换到 v1 版
 
 | 工具名 | 功能 | GPIO |
 |--------|------|------|
-| `self.relay.set` | 继电器开/关 | GPIO15 |
+| `self.relay.set` | 继电器开/关 | GPIO3 |
 | `self.fan.set` | 风扇开/关 | GPIO7 |
 | `self.light.set` | WS2812B 彩灯开/关/RGB（四颗灯一起亮） | GPIO8 |
 | `self.light.set_chase` | WS2812B 彩灯走马灯动画（可调颜色/速度） | GPIO8 |
@@ -164,7 +164,7 @@ WS2812B 彩灯接 GPIO8，灯带前四颗灯一起控制；`self.light.set_chase
 
 | 驱动板通道 | IN1 | IN2 | 接电机 |
 |-----------|-----|-----|--------|
-| CH1 | GPIO3 | GPIO4 | 左侧电机组 |
+| CH1 | GPIO15 | GPIO4 | 左侧电机组 |
 | CH2 | GPIO5 | GPIO6 | 左侧电机组（与 CH1 并联） |
 | CH3 | GPIO16 | GPIO17 | 右侧电机组 |
 | CH4 | GPIO18 | GPIO46 | 右侧电机组（与 CH3 并联） |
