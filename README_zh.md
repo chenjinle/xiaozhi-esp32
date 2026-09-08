@@ -191,6 +191,33 @@ ML307 接线：
 | GND | GND |
 | VCC | 按模块要求供电（一般 3.8~4.2V，勿直接用 5V） |
 
+#### GPIO 引脚总览（yse-esp32s3-hmi）
+
+（摄像头与 SD 卡未启用，相关引脚已复用）
+
+| 模块 | 引脚 | 功能 |
+|------|------|------|
+| 麦克风 | GPIO40 / GPIO42 / GPIO41 | I2S WS / SCK / DIN |
+| 喇叭 | GPIO21 / GPIO47 / GPIO48 | I2S DOUT / BCLK / LRCK |
+| 屏幕 | GPIO10 / GPIO11 / GPIO12 | SPI CS / MOSI / CLK |
+| 屏幕 | GPIO13 / GPIO14 | SPI MISO / DC |
+| 屏幕 | GPIO39 / GPIO38 | 复位 RST / 背光 |
+| 触摸 | GPIO1 / GPIO2 | I2C SDA / SCL |
+| 触摸 | GPIO43 / GPIO44 | 复位 RST / 中断 INT |
+| BOOT 键 | GPIO0 | 单击对话开关；开机双击切换 Wi-Fi/4G |
+| 继电器 | GPIO3 | `self.relay.set` |
+| 风扇 | GPIO7 | `self.fan.set` |
+| RGB 彩灯 | GPIO8 | WS2812B×4，`self.light.set` / `self.light.set_chase` |
+| 蜂鸣器 | GPIO9 | `self.buzzer.set` |
+| DHT11 温湿度 | GPIO18 | `self.sensor.read_temperature_humidity` |
+| 电机 CH1（左） | GPIO15（IN1）/ GPIO4（IN2） | `self.car.move` |
+| 电机 CH3（右） | GPIO16（IN1）/ GPIO17（IN2） | `self.car.move` |
+| ML307 4G | GPIO5（TX）/ GPIO6（RX） | 双网络，开机双击 BOOT 切换 |
+| USB | GPIO19 / GPIO20 | 烧录与日志 |
+| PSRAM | GPIO26~37 | 八线 PSRAM 保留，不可用 |
+| 空闲 | GPIO46 | strapping 脚，仅上电采样，可用 |
+| 不推荐 | GPIO45 | VDD_SPI 电压选择脚 |
+
 #### 使用前提
 
 - 硬件接线：继电器等外设需接到板子对应的 GPIO（以板子 `config.h` 为准），并与 ESP32 共地。
