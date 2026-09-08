@@ -148,11 +148,28 @@ v1 的稳定版本为 1.9.2，可以通过 `git checkout v1` 来切换到 v1 版
 |--------|------|------|
 | `self.relay.set` | 继电器开/关 | GPIO15 |
 | `self.fan.set` | 风扇开/关 | GPIO7 |
-| `self.light.set` | WS2812B 彩灯开/关/RGB | GPIO8 |
+| `self.light.set` | WS2812B 彩灯开/关/RGB（四颗灯一起亮） | GPIO8 |
+| `self.light.set_chase` | WS2812B 彩灯走马灯动画（可调颜色/速度） | GPIO8 |
 | `self.buzzer.set` | 蜂鸣器开/关 | GPIO9 |
+| `self.car.move` | 小车前进/后退/左转/右转/停止 | 见下表 |
 | `self.peripherals.get_status` | 查询外设状态 | - |
 
 所有板子还提供通用工具，如 `self.get_device_status`、`self.audio_speaker.set_volume`、`self.screen.set_brightness`、`self.camera.take_photo` 等。
+
+#### 彩灯与小车接线（yse-esp32s3-hmi）
+
+WS2812B 彩灯接 GPIO8，灯带前四颗灯一起控制；`self.light.set_chase` 参数：`on`（开关）、`red/green/blue`（颜色，默认白色）、`speed_ms`（移动间隔，默认 120ms）。
+
+小车驱动板为 4 通道、每通道 2 个 IO（IN1/IN2），共 8 个 IO，复用摄像头空闲引脚（该板摄像头未启用）。左右差速结构：CH1+CH2 并联接左侧电机组，CH3+CH4 并联接右侧电机组：
+
+| 驱动板通道 | IN1 | IN2 | 接电机 |
+|-----------|-----|-----|--------|
+| CH1 | GPIO3 | GPIO4 | 左侧电机组 |
+| CH2 | GPIO5 | GPIO6 | 左侧电机组（与 CH1 并联） |
+| CH3 | GPIO16 | GPIO17 | 右侧电机组 |
+| CH4 | GPIO18 | GPIO46 | 右侧电机组（与 CH3 并联） |
+
+> 注意：GPIO3、GPIO46 为 strapping 引脚（仅复位瞬间采样），上电时驱动板输入保持高阻即可；GPIO45（VDD_SPI 电压选择）不可使用。当前电机为开关量控制（全速/停止），如需 PWM 调速需将 IN1/IN2 改为 LEDC 输出。
 
 #### 使用前提
 

@@ -80,6 +80,21 @@
 #define PERIPHERAL_RELAY_GPIO     GPIO_NUM_15
 #define PERIPHERAL_FAN_GPIO       GPIO_NUM_7
 #define PERIPHERAL_LIGHT_GPIO     GPIO_NUM_8
+#define PERIPHERAL_LIGHT_LED_COUNT 4
 #define PERIPHERAL_BUZZER_GPIO    GPIO_NUM_9
+
+// Car motor driver: 4 channels, 2 IOs each (IN1/IN2), 8 IOs total.
+// Reuses the idle camera pins (camera is disabled on this board).
+// Left side: CH1 + CH2 in parallel, right side: CH3 + CH4 in parallel.
+// NOTE: GPIO3/GPIO46 are strapping pins (sampled at reset only); keep the
+// driver inputs high-impedance at power-on. GPIO45 (VDD_SPI strap) is NOT used.
+#define MOTOR_CH1_IN1_GPIO        GPIO_NUM_3
+#define MOTOR_CH1_IN2_GPIO        GPIO_NUM_4
+#define MOTOR_CH2_IN1_GPIO        GPIO_NUM_5
+#define MOTOR_CH2_IN2_GPIO        GPIO_NUM_6
+#define MOTOR_CH3_IN1_GPIO        GPIO_NUM_16
+#define MOTOR_CH3_IN2_GPIO        GPIO_NUM_17
+#define MOTOR_CH4_IN1_GPIO        GPIO_NUM_18
+#define MOTOR_CH4_IN2_GPIO        GPIO_NUM_46
 
 #endif // _BOARD_CONFIG_H_
