@@ -40,11 +40,9 @@ class YsePeripheralControls {
     int chase_speed_ms_ = 120;
     TaskHandle_t chase_task_ = nullptr;
 
-    MotorChannel motor_channels_[4] = {
+    MotorChannel motor_channels_[2] = {
         {MOTOR_CH1_IN1_GPIO, MOTOR_CH1_IN2_GPIO},
-        {MOTOR_CH2_IN1_GPIO, MOTOR_CH2_IN2_GPIO},
         {MOTOR_CH3_IN1_GPIO, MOTOR_CH3_IN2_GPIO},
-        {MOTOR_CH4_IN1_GPIO, MOTOR_CH4_IN2_GPIO},
     };
 
     static void Check(esp_err_t err) {
@@ -164,15 +162,11 @@ class YsePeripheralControls {
                 } else if (action == "left") {
                     // 左轮反转、右轮正转，原地左转
                     MotorSetChannel(motor_channels_[0], false);
-                    MotorSetChannel(motor_channels_[1], false);
-                    MotorSetChannel(motor_channels_[2], true);
-                    MotorSetChannel(motor_channels_[3], true);
+                    MotorSetChannel(motor_channels_[1], true);
                 } else if (action == "right") {
                     // 左轮正转、右轮反转，原地右转
                     MotorSetChannel(motor_channels_[0], true);
-                    MotorSetChannel(motor_channels_[1], true);
-                    MotorSetChannel(motor_channels_[2], false);
-                    MotorSetChannel(motor_channels_[3], false);
+                    MotorSetChannel(motor_channels_[1], false);
                 } else if (action == "stop") {
                     MotorStopAll();
                 } else {

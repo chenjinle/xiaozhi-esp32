@@ -1,4 +1,4 @@
-#include "wifi_board.h"
+#include "dual_network_board.h"
 #include "codecs/no_audio_codec.h"
 #include "display/lcd_display.h"
 #include "application.h"
@@ -24,7 +24,7 @@
 
 #define TAG "YseEsp32s3Hmi"
 
-class YseEsp32s3Hmi : public WifiBoard {
+class YseEsp32s3Hmi : public DualNetworkBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     Button boot_button_;
@@ -196,16 +196,25 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting) {
-                EnterWifiConfigMode();
-                return;
+            if (GetNetworkType() == NetworkType::WIFI) {
+                if (app.GetDeviceState() == kDeviceStateStarting) {
+                    auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
+                    wifi_board.EnterWifiConfigMode();
+                    return;
+                }
             }
             app.ToggleChatState();
+        });
+        boot_button_.OnDoubleClick([this]() {
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateStarting || app.GetDeviceState() == kDeviceStateWifiConfiguring) {
+                SwitchNetworkType();
+            }
         });
     }
 
 public:
-    YseEsp32s3Hmi() : boot_button_(BOOT_BUTTON_GPIO) {
+    YseEsp32s3Hmi() : DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC, 0), boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
         InitializeDisplay();
         InitializeTouch();

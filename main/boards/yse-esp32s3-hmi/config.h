@@ -83,18 +83,19 @@
 #define PERIPHERAL_LIGHT_LED_COUNT 4
 #define PERIPHERAL_BUZZER_GPIO    GPIO_NUM_9
 
-// Car motor driver: 4 channels, 2 IOs each (IN1/IN2), 8 IOs total.
+// Car motor driver: 2 channels, 2 IOs each (IN1/IN2), 4 IOs total.
 // Reuses the idle camera pins (camera is disabled on this board).
-// Left side: CH1 + CH2 in parallel, right side: CH3 + CH4 in parallel.
+// Left side: CH1, right side: CH3 (differential drive).
 // NOTE: GPIO3/GPIO46 are strapping pins (sampled at reset only); keep the
 // driver/relay inputs high-impedance at power-on. GPIO45 (VDD_SPI strap) is NOT used.
 #define MOTOR_CH1_IN1_GPIO        GPIO_NUM_15
 #define MOTOR_CH1_IN2_GPIO        GPIO_NUM_4
-#define MOTOR_CH2_IN1_GPIO        GPIO_NUM_5
-#define MOTOR_CH2_IN2_GPIO        GPIO_NUM_6
 #define MOTOR_CH3_IN1_GPIO        GPIO_NUM_16
 #define MOTOR_CH3_IN2_GPIO        GPIO_NUM_17
-#define MOTOR_CH4_IN1_GPIO        GPIO_NUM_18
-#define MOTOR_CH4_IN2_GPIO        GPIO_NUM_46
+
+// ML307 Cat.1 4G module UART (dual network: Wi-Fi + 4G)
+// ESP32 TX (GPIO5) -> ML307 RX; ESP32 RX (GPIO6) <- ML307 TX
+#define ML307_TX_PIN              GPIO_NUM_5
+#define ML307_RX_PIN              GPIO_NUM_6
 
 #endif // _BOARD_CONFIG_H_
