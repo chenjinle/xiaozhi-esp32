@@ -82,21 +82,23 @@
 #define PERIPHERAL_LIGHT_GPIO     GPIO_NUM_8
 #define PERIPHERAL_LIGHT_LED_COUNT 4
 #define PERIPHERAL_BUZZER_GPIO    GPIO_NUM_9
-#define PERIPHERAL_DHT11_GPIO     GPIO_NUM_18
+#define PERIPHERAL_DHT11_GPIO     GPIO_NUM_4
+#define PERIPHERAL_PIR_GPIO       GPIO_NUM_5
+#define PERIPHERAL_MQ2_DO_GPIO    GPIO_NUM_18
+// MQ-2 DO 报警极性：1 = 高电平报警（蓝灯亮=超标，按实测）；0 = 低电平报警
+#define PERIPHERAL_MQ2_DO_ACTIVE_HIGH   1
 
-// Car motor driver: 2 channels, 2 IOs each (IN1/IN2), 4 IOs total.
-// Reuses the idle camera pins (camera is disabled on this board).
-// Left side: CH1, right side: CH3 (differential drive).
-// NOTE: GPIO3/GPIO46 are strapping pins (sampled at reset only); keep the
-// driver/relay inputs high-impedance at power-on. GPIO45 (VDD_SPI strap) is NOT used.
-#define MOTOR_CH1_IN1_GPIO        GPIO_NUM_15
-#define MOTOR_CH1_IN2_GPIO        GPIO_NUM_4
-#define MOTOR_CH3_IN1_GPIO        GPIO_NUM_16
-#define MOTOR_CH3_IN2_GPIO        GPIO_NUM_17
+// PIR 模拟量阈值（16 位标度，与 MicroPython read_u16 一致，12 位 ADC 读数会左移 4 位）
+// 有人判定：raw16 > THRESHOLD；无人判定：raw16 < RELEASE
+// 实际值因人/模块而异，先烧录看串口日志的 PIR ADC 值再调整
+#define PERIPHERAL_PIR_ADC_THRESHOLD    500
+#define PERIPHERAL_PIR_ADC_RELEASE      100
+#define PERIPHERAL_PIR_OFF_DELAY_MS     15000  // 人体离开后延时关灯（可配置）
+#define PERIPHERAL_PIR_CONTROL_RELAY    1      // 1 = PIR 同时联动继电器（智能镜背光）
 
 // ML307 Cat.1 4G module UART (dual network: Wi-Fi + 4G)
-// ESP32 TX (GPIO5) -> ML307 RX; ESP32 RX (GPIO6) <- ML307 TX
-#define ML307_TX_PIN              GPIO_NUM_5
-#define ML307_RX_PIN              GPIO_NUM_6
+// ESP32 TX (GPIO15) -> ML307 RX; ESP32 RX (GPIO16) <- ML307 TX
+#define ML307_TX_PIN              GPIO_NUM_15
+#define ML307_RX_PIN              GPIO_NUM_16
 
 #endif // _BOARD_CONFIG_H_

@@ -151,28 +151,26 @@ v1 的稳定版本为 1.9.2，可以通过 `git checkout v1` 来切换到 v1 版
 | `self.light.set` | WS2812B 彩灯开/关/RGB（四颗灯一起亮） | GPIO8 |
 | `self.light.set_chase` | WS2812B 彩灯走马灯动画（可调颜色/速度） | GPIO8 |
 | `self.buzzer.set` | 蜂鸣器开/关 | GPIO9 |
-| `self.sensor.read_temperature_humidity` | 读取 DHT11 温湿度 | GPIO18 |
-| `self.car.move` | 小车前进/后退/左转/右转/停止 | 见下表 |
+| `self.sensor.read_temperature_humidity` | 读取 DHT11 温湿度 | GPIO4 |
 | `self.peripherals.get_status` | 查询外设状态 | - |
 
 所有板子还提供通用工具，如 `self.get_device_status`、`self.audio_speaker.set_volume`、`self.screen.set_brightness`、`self.camera.take_photo` 等。
 
-#### 彩灯与小车接线（yse-esp32s3-hmi）
+小车电机已停用（引脚让给 4G 模块和传感器）。
+
+#### 彩灯与传感器接线（yse-esp32s3-hmi）
 
 WS2812B 彩灯接 GPIO8，灯带前四颗灯一起控制；`self.light.set_chase` 参数：`on`（开关）、`red/green/blue`（颜色，默认白色）、`speed_ms`（移动间隔，默认 120ms）。
 
-小车驱动板用 2 通道差速转向，每通道 2 个 IO（IN1/IN2），共 4 个 IO，复用摄像头空闲引脚（该板摄像头未启用）。左边两个电机并联接 CH1，右边两个电机并联接 CH3：
+DHT11 温湿度传感器数据脚接 **GPIO4**，VCC 接 3.3V，GND 共地，数据脚需 4.7k~10kΩ 上拉（多数模块自带）。语音指令示例："现在温度多少度" / "现在湿度是多少"。
 
-| 驱动板通道 | IN1 | IN2 | 接电机 |
-|-----------|-----|-----|--------|
-| CH1（左） | GPIO15 | GPIO4 | 左侧电机组（两电机并联） |
-| CH3（右） | GPIO16 | GPIO17 | 右侧电机组（两电机并联） |
+PIR 人体感应模块（**模拟量输出**）接 **GPIO5**（ADC1_CH4）。固件后台任务用 ADC 持续采样，超过阈值后：自动点亮彩灯（暖白色，氛围灯）+ 触发语音问候"主人你好"；**人体离开超过 `PERIPHERAL_PIR_OFF_DELAY_MS`（默认 15000ms = 15 秒）后自动熄灭灯光**。阈值在 `config.h` 里配置：`PERIPHERAL_PIR_ADC_THRESHOLD`（默认 500，16 位标度，与 MicroPython `read_u16` 一致）和 `PERIPHERAL_PIR_ADC_RELEASE`（默认 100）。
 
-> 注意：GPIO3 为 strapping 引脚（仅复位瞬间采样），上电时继电器输入保持高阻即可；GPIO45（VDD_SPI 电压选择）不可使用。当前电机为开关量控制（全速/停止），如需 PWM 调速需将 IN1/IN2 改为 LEDC 输出。
+- **灵敏度可语音/软件调节**：MCP 工具 `self.pir.set_sensitivity`（参数 threshold 0~65535，越小越灵敏），说"把人体感应调灵敏一点"即可
+- **联动继电器（默认开启）**：PIR 检测到人时同步闭合继电器（GPIO3，可接智能镜背光），人离开延时后同步断开；如需关闭联动，把 `config.h` 里 `PERIPHERAL_PIR_CONTROL_RELAY` 改为 0
+- **调阈值方法**：烧录后看串口日志每 5 秒打印的 `PIR ADC raw16=` 数值，把阈值设为"有人时数值和无人时数值之间的值"即可
 
-#### DHT11 温湿度传感器
-
-DHT11 数据脚接 **GPIO18**，VCC 接 3.3V，GND 共地。数据脚需 4.7k~10kΩ 上拉电阻到 3.3V（多数 DHT11 模块自带）。语音指令示例："现在温度多少度" / "现在湿度是多少" / "室内温湿度是多少"，大模型会调用 `self.sensor.read_temperature_humidity` 并播报结果。
+MQ-2 烟雾传感器 **DO 输出**接 **GPIO18**（按实测：DO 高电平=超标，蓝灯亮=超标；报警极性可在 `config.h` 的 `PERIPHERAL_MQ2_DO_ACTIVE_HIGH` 修改，1=高电平报警，0=低电平报警）。固件后台任务检测到超标后：蜂鸣器长鸣 + 彩灯红色闪烁声光报警；浓度恢复正常后自动解除。未接模块时引脚固定为"不报警"电平，不会误报警。
 
 #### 4G 双网络（Wi-Fi + ML307）
 
@@ -186,37 +184,41 @@ ML307 接线：
 
 | ML307 模块 | ESP32-S3 引脚 |
 |-----------|--------------|
-| TX | GPIO6（ML307_RX_PIN） |
-| RX | GPIO5（ML307_TX_PIN） |
+| TX | GPIO16（ML307_RX_PIN） |
+| RX | GPIO15（ML307_TX_PIN） |
 | GND | GND |
 | VCC | 按模块要求供电（一般 3.8~4.2V，勿直接用 5V） |
 
-#### GPIO 引脚总览（yse-esp32s3-hmi）
+#### 模块引脚与工作方式总表（yse-esp32s3-hmi）
 
-（摄像头与 SD 卡未启用，相关引脚已复用）
+（摄像头、SD 卡与小车电机未启用，相关引脚已复用）
 
-| 模块 | 引脚 | 功能 |
-|------|------|------|
-| 麦克风 | GPIO40 / GPIO42 / GPIO41 | I2S WS / SCK / DIN |
-| 喇叭 | GPIO21 / GPIO47 / GPIO48 | I2S DOUT / BCLK / LRCK |
-| 屏幕 | GPIO10 / GPIO11 / GPIO12 | SPI CS / MOSI / CLK |
-| 屏幕 | GPIO13 / GPIO14 | SPI MISO / DC |
-| 屏幕 | GPIO39 / GPIO38 | 复位 RST / 背光 |
-| 触摸 | GPIO1 / GPIO2 | I2C SDA / SCL |
-| 触摸 | GPIO43 / GPIO44 | 复位 RST / 中断 INT |
-| BOOT 键 | GPIO0 | 单击对话开关；开机双击切换 Wi-Fi/4G |
-| 继电器 | GPIO3 | `self.relay.set` |
-| 风扇 | GPIO7 | `self.fan.set` |
-| RGB 彩灯 | GPIO8 | WS2812B×4，`self.light.set` / `self.light.set_chase` |
-| 蜂鸣器 | GPIO9 | `self.buzzer.set` |
-| DHT11 温湿度 | GPIO18 | `self.sensor.read_temperature_humidity` |
-| 电机 CH1（左） | GPIO15（IN1）/ GPIO4（IN2） | `self.car.move` |
-| 电机 CH3（右） | GPIO16（IN1）/ GPIO17（IN2） | `self.car.move` |
-| ML307 4G | GPIO5（TX）/ GPIO6（RX） | 双网络，开机双击 BOOT 切换 |
-| USB | GPIO19 / GPIO20 | 烧录与日志 |
-| PSRAM | GPIO26~37 | 八线 PSRAM 保留，不可用 |
-| 空闲 | GPIO46 | strapping 脚，仅上电采样，可用 |
-| 不推荐 | GPIO45 | VDD_SPI 电压选择脚 |
+| 模块 | 引脚 | 类型 | 工作方式 |
+|------|------|------|---------|
+| 麦克风 | GPIO40（WS）/ GPIO42（SCK）/ GPIO41（DIN） | I2S 输入 | 采集语音，采样率 24kHz |
+| 喇叭 | GPIO21（DOUT）/ GPIO47（BCLK）/ GPIO48（LRCK） | I2S 输出 | 播放 TTS 语音与提示音 |
+| 屏幕 | GPIO10（CS）/ GPIO11（MOSI）/ GPIO12（CLK）/ GPIO13（MISO）/ GPIO14（DC） | SPI | ST7796 480×320 显示 |
+| 屏幕 | GPIO39（RST）/ GPIO38（背光） | GPIO | 屏幕复位 / PWM 背光 |
+| 触摸 | GPIO1（SDA）/ GPIO2（SCL）/ GPIO43（RST）/ GPIO44（INT） | I2C + GPIO | FT5x06 触摸输入 |
+| BOOT 键 | GPIO0 | 输入 | 单击=对话开关；开机双击=切换 Wi-Fi/4G |
+| 继电器 | **GPIO3** | 输出，高电平吸合 | ① 语音 `self.relay.set` ② PIR 有人联动吸合、离开延时断开（默认开启） |
+| 风扇 | GPIO7 | 输出，高电平开 | 语音 `self.fan.set` |
+| RGB 彩灯 | GPIO8 | WS2812B×4（RMT） | ① 语音 `self.light.set` 开/关/变色 ② 语音 `self.light.set_chase` 走马灯 ③ PIR 有人→自动暖白 ④ 烟雾报警→红色闪烁 |
+| 蜂鸣器 | GPIO9 | 输出，高电平响 | ① 语音 `self.buzzer.set` ② 烟雾超标→长鸣报警 |
+| DHT11 温湿度 | GPIO4 | 单总线（需上拉 4.7k~10k） | 语音 `self.sensor.read_temperature_humidity` 查询温湿度 |
+| PIR 人体感应 | GPIO5 | ADC1_CH4 模拟量输入 | 后台任务每 100ms 采样：超阈值→开灯+继电器+问候"主人你好"；离开 15 秒→自动关灯。灵敏度可语音调 `self.pir.set_sensitivity` |
+| MQ-2 烟雾 | GPIO18 | 数字输入 DO，低电平=超标 | 后台任务检测：超标→蜂鸣器长鸣+红灯闪烁；恢复→自动解除。灵敏度由模块电位器调 |
+| ML307 4G | GPIO15（TX）/ GPIO16（RX） | UART | Wi-Fi/4G 双网络，同一时间只用一个，开机双击 BOOT 切换 |
+| USB | GPIO19 / GPIO20 | USB | 烧录与日志 |
+| PSRAM | GPIO26~37 | 保留 | 八线 PSRAM，不可用 |
+| 空闲 | GPIO6 / GPIO17 / GPIO46 | - | GPIO46 为 strapping 脚，仅上电采样 |
+| 不推荐 | GPIO45 | - | VDD_SPI 电压选择脚 |
+
+**自动运行的后台逻辑**（无需语音触发）：
+
+1. **PIR 人体感应**：有人 → 彩灯暖白 + 继电器吸合 + 问候"主人你好"；人离开超过 `PERIPHERAL_PIR_OFF_DELAY_MS`（默认 15 秒）→ 自动熄灯、断开继电器
+2. **MQ-2 烟雾报警**：DO 变低（超标）连续 300ms → 蜂鸣器长鸣 + 彩灯红色闪烁；DO 恢复高电平 → 自动解除报警
+3. **传感器未接不影响语音对话**：PIR 未接读到 0（无人）、MQ-2 未接读到高（不超标）、DHT11 未接返回读取失败，均不会卡死或误触发
 
 #### 使用前提
 

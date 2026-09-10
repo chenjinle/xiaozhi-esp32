@@ -1,13 +1,17 @@
 #pragma once
 
+#include "application.h"
 #include "config.h"
+#include "device_state.h"
 #include "dht11_sensor.h"
 #include "mcp_server.h"
 #include <driver/gpio.h>
-#include <led_strip.h>
+#include <esp_adc/adc_oneshot.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <led_strip.h>
 #include <mutex>
 #include <stdexcept>
 
@@ -20,13 +24,9 @@
 //           (on/off + RGB color + chase/marquee animation, all LEDs light together)
 //   buzzer: GPIO on/off output (drives an active buzzer; use PWM if passive)
 //   dht11:  temperature & humidity sensor (single-wire)
-//   car:    2-channel motor driver (IN1/IN2 per channel, 4 GPIOs), differential drive
+//   pir:    PIR motion sensor (analog output, ADC read), auto light + greeting
+//   mq2:    smoke/gas sensor DO input (active low), auto sound & light alarm
 class YsePeripheralControls {
-    struct MotorChannel {
-        gpio_num_t in1;
-        gpio_num_t in2;
-    };
-
     std::mutex mutex_;
     bool relay_on_ = false;
     bool fan_on_ = false;
@@ -43,10 +43,14 @@ class YsePeripheralControls {
     int chase_speed_ms_ = 120;
     TaskHandle_t chase_task_ = nullptr;
 
-    MotorChannel motor_channels_[2] = {
-        {MOTOR_CH1_IN1_GPIO, MOTOR_CH1_IN2_GPIO},
-        {MOTOR_CH3_IN1_GPIO, MOTOR_CH3_IN2_GPIO},
-    };
+    // 传感器后台监测任务
+    TaskHandle_t sensor_task_ = nullptr;
+    int64_t pir_cooldown_until_ = 0;   // 毫秒时间戳，防止持续检测到人时反复问候
+    int64_t pir_last_active_ms_ = 0;   // 最后一次检测到人的时间
+    bool pir_light_on_ = false;        // 灯光是否由 PIR 点亮（用于自动关灯）
+    int pir_threshold_ = PERIPHERAL_PIR_ADC_THRESHOLD;  // 运行时灵敏度阈值
+    bool gas_alarm_on_ = false;
+    adc_oneshot_unit_handle_t pir_adc_handle_ = nullptr;
 
     static void Check(esp_err_t err) {
         if (err != ESP_OK) throw std::runtime_error(esp_err_to_name(err));
@@ -63,8 +67,7 @@ class YsePeripheralControls {
         Check(gpio_set_level(pin, 0));
     }
 
-    // All methods below that touch LEDs/motors assume mutex_ is already held,
-    // unless explicitly stated otherwise.
+    // 以下操作 LED 的方法默认调用者已持有 mutex_
 
     void SetLight(bool on, uint8_t r, uint8_t g, uint8_t b) {
         if (light_strip_ == nullptr) return;
@@ -121,63 +124,180 @@ class YsePeripheralControls {
         chase_on_ = false;
     }
 
-    // ---- 电机 ----
+    // ---- 传感器输入初始化 ----
 
-    void MotorSetChannel(const MotorChannel& ch, bool forward) {
-        gpio_set_level(ch.in1, forward ? 1 : 0);
-        gpio_set_level(ch.in2, forward ? 0 : 1);
+    void InitSensorInputs() {
+        // PIR：模拟量输出，走 ADC1 通道读取（GPIO5 = ADC1_CH4）
+        adc_oneshot_unit_init_cfg_t adc_init = {};
+        adc_init.unit_id = ADC_UNIT_1;
+        adc_init.ulp_mode = ADC_ULP_MODE_DISABLE;
+        Check(adc_oneshot_new_unit(&adc_init, &pir_adc_handle_));
+
+        adc_oneshot_chan_cfg_t adc_chan = {};
+        adc_chan.atten = ADC_ATTEN_DB_12;   // 最大量程，约 0~3.1V
+        adc_chan.bitwidth = ADC_BITWIDTH_12;
+        Check(adc_oneshot_config_channel(pir_adc_handle_, ADC_CHANNEL_4, &adc_chan));
+
+        // MQ2 DO：报警极性由 PERIPHERAL_MQ2_DO_ACTIVE_HIGH 决定；
+        // 未接模块时固定为"不报警"电平
+        gpio_config_t mq2_cfg = {};
+        mq2_cfg.pin_bit_mask = 1ULL << PERIPHERAL_MQ2_DO_GPIO;
+        mq2_cfg.mode = GPIO_MODE_INPUT;
+#if PERIPHERAL_MQ2_DO_ACTIVE_HIGH
+        mq2_cfg.pull_up_en = GPIO_PULLUP_DISABLE;
+        mq2_cfg.pull_down_en = GPIO_PULLDOWN_ENABLE;   // 未接 = 低 = 不报警
+#else
+        mq2_cfg.pull_up_en = GPIO_PULLUP_ENABLE;       // 未接 = 高 = 不报警
+        mq2_cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+#endif
+        mq2_cfg.intr_type = GPIO_INTR_DISABLE;
+        Check(gpio_config(&mq2_cfg));
+
+        ESP_LOGI(TAG, "Sensor inputs initialized (PIR ADC1_CH4 on GPIO%d, MQ2 DO GPIO%d)",
+                 (int)PERIPHERAL_PIR_GPIO, (int)PERIPHERAL_MQ2_DO_GPIO);
     }
 
-    void MotorStopChannel(const MotorChannel& ch) {
-        gpio_set_level(ch.in1, 0);
-        gpio_set_level(ch.in2, 0);
-    }
+    // ---- 传感器后台监测任务 ----
 
-    void MotorStopAll() {
-        for (auto& ch : motor_channels_) MotorStopChannel(ch);
-    }
-
-    void InitializeMotors() {
-        for (auto& ch : motor_channels_) {
-            gpio_config_t cfg = {};
-            cfg.pin_bit_mask = (1ULL << ch.in1) | (1ULL << ch.in2);
-            cfg.mode = GPIO_MODE_OUTPUT;
-            cfg.pull_up_en = GPIO_PULLUP_DISABLE;
-            cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
-            cfg.intr_type = GPIO_INTR_DISABLE;
-            Check(gpio_config(&cfg));
-            MotorStopChannel(ch);
+    void HandlePirActive() {
+        int64_t now = esp_timer_get_time() / 1000;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pir_last_active_ms_ = now;
+            if (!pir_light_on_) {
+                pir_light_on_ = true;
+                StopChaseLocked();
+                SetLight(true, 255, 200, 100);      // 暖白灯（氛围灯）
+                light_on_ = true;
+#if PERIPHERAL_PIR_CONTROL_RELAY
+                Check(gpio_set_level(PERIPHERAL_RELAY_GPIO, 1));
+                relay_on_ = true;
+#endif
+            }
         }
 
-        auto& mcp = McpServer::GetInstance();
-        mcp.AddTool("self.car.move",
-            "Control the car movement. action must be one of:\n"
-            "forward: move forward\nbackward: move backward\n"
-            "left: turn left in place\nright: turn right in place\nstop: stop immediately",
-            PropertyList({Property("action", kPropertyTypeString)}),
-            [this](const PropertyList& p) -> ReturnValue {
-                std::lock_guard<std::mutex> lock(mutex_);
-                const std::string action = p["action"].value<std::string>();
-                if (action == "forward") {
-                    for (auto& ch : motor_channels_) MotorSetChannel(ch, true);
-                } else if (action == "backward") {
-                    for (auto& ch : motor_channels_) MotorSetChannel(ch, false);
-                } else if (action == "left") {
-                    // 左轮反转、右轮正转，原地左转
-                    MotorSetChannel(motor_channels_[0], false);
-                    MotorSetChannel(motor_channels_[1], true);
-                } else if (action == "right") {
-                    // 左轮正转、右轮反转，原地右转
-                    MotorSetChannel(motor_channels_[0], true);
-                    MotorSetChannel(motor_channels_[1], false);
-                } else if (action == "stop") {
-                    MotorStopAll();
-                } else {
-                    return false;
+        // 语音问候"主人你好"（服务器 TTS，空闲状态才触发，30 秒冷却）
+        if (now >= pir_cooldown_until_) {
+            pir_cooldown_until_ = now + 30000;
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateIdle) {
+                app.WakeWordInvoke("主人你好");
+            }
+        }
+        ESP_LOGD(TAG, "PIR active");
+    }
+
+    void HandlePirLeave() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (pir_light_on_) {
+            pir_light_on_ = false;
+            ClearLight();
+            light_on_ = false;
+#if PERIPHERAL_PIR_CONTROL_RELAY
+            Check(gpio_set_level(PERIPHERAL_RELAY_GPIO, 0));
+            relay_on_ = false;
+#endif
+            ESP_LOGI(TAG, "PIR leave: light off");
+        }
+    }
+
+    void HandleGasAlarmStart() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!gas_alarm_on_) {
+            gas_alarm_on_ = true;
+            Check(gpio_set_level(PERIPHERAL_BUZZER_GPIO, 1));
+            buzzer_on_ = true;
+            StopChaseLocked();
+            SetLight(true, 255, 0, 0);  // 红灯
+            ESP_LOGW(TAG, "Gas alarm triggered!");
+        }
+    }
+
+    void HandleGasAlarmStop() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (gas_alarm_on_) {
+            gas_alarm_on_ = false;
+            Check(gpio_set_level(PERIPHERAL_BUZZER_GPIO, 0));
+            buzzer_on_ = false;
+            ClearLight();
+            light_on_ = false;
+            ESP_LOGI(TAG, "Gas alarm cleared");
+        }
+    }
+
+    void SensorMonitorTask() {
+        int pir_debounce = 0;
+        int mq2_debounce = 0;
+        int flash_counter = 0;
+        int log_counter = 0;
+        bool flash_on = false;
+
+        ESP_LOGI(TAG, "Sensor monitor task started");
+
+        while (true) {
+            // PIR：模拟量输出，ADC 读取（12 位原始值左移 4 位，对齐 MicroPython read_u16）
+            int pir_raw = 0;
+            if (pir_adc_handle_ != nullptr &&
+                adc_oneshot_read(pir_adc_handle_, ADC_CHANNEL_4, &pir_raw) == ESP_OK) {
+                int pir_raw16 = pir_raw << 4;
+                if (pir_raw16 > pir_threshold_) {
+                    if (++pir_debounce >= 3) {
+                        pir_debounce = 3;
+                        HandlePirActive();
+                    }
+                } else if (pir_raw16 < PERIPHERAL_PIR_ADC_RELEASE) {
+                    pir_debounce = 0;
                 }
-                return true;
-            });
-        ESP_LOGI(TAG, "Car motor controls registered");
+            }
+
+            // 人体离开超过延时后自动关灯
+            if (pir_light_on_) {
+                int64_t now = esp_timer_get_time() / 1000;
+                if (now - pir_last_active_ms_ >= PERIPHERAL_PIR_OFF_DELAY_MS) {
+                    HandlePirLeave();
+                }
+            }
+
+            // MQ2 DO：报警极性由 PERIPHERAL_MQ2_DO_ACTIVE_HIGH 决定，需连续 3 次（300ms）确认
+            int mq2_alarm_level = PERIPHERAL_MQ2_DO_ACTIVE_HIGH ? 1 : 0;
+            if (gpio_get_level(PERIPHERAL_MQ2_DO_GPIO) == mq2_alarm_level) {
+                if (++mq2_debounce >= 3) {
+                    mq2_debounce = 3;
+                    HandleGasAlarmStart();
+                }
+            } else {
+                if (mq2_debounce >= 3) HandleGasAlarmStop();
+                mq2_debounce = 0;
+            }
+
+            // 报警期间红灯闪烁（每 500ms 翻转）
+            if (gas_alarm_on_) {
+                if (++flash_counter >= 5) {
+                    flash_counter = 0;
+                    flash_on = !flash_on;
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    SetLight(flash_on, 255, 0, 0);
+                }
+            }
+
+            // 每 5 秒打印一次 PIR ADC 值，方便调阈值
+            if (++log_counter >= 50) {
+                log_counter = 0;
+                int raw = 0;
+                if (pir_adc_handle_ != nullptr &&
+                    adc_oneshot_read(pir_adc_handle_, ADC_CHANNEL_4, &raw) == ESP_OK) {
+                    ESP_LOGI(TAG, "PIR ADC raw16=%d (threshold=%d)", raw << 4, pir_threshold_);
+                }
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
+
+    void StartSensorMonitorTask() {
+        xTaskCreate([](void* arg) {
+            static_cast<YsePeripheralControls*>(arg)->SensorMonitorTask();
+        }, "sensor_monitor", 4096, this, 5, &sensor_task_);
     }
 
 public:
@@ -196,7 +316,8 @@ public:
         Check(led_strip_new_rmt_device(&strip_cfg, &rmt_cfg, &light_strip_));
         led_strip_clear(light_strip_);
 
-        InitializeMotors();
+        InitSensorInputs();
+        StartSensorMonitorTask();
 
         auto& mcp = McpServer::GetInstance();
 
@@ -279,6 +400,17 @@ public:
                 return true;
             });
 
+        mcp.AddTool("self.pir.set_sensitivity",
+            "Adjust the PIR motion sensor sensitivity threshold (0-65535, default 500). "
+            "Lower value = more sensitive, higher value = less sensitive.",
+            PropertyList({Property("threshold", kPropertyTypeInteger, 500, 0, 65535)}),
+            [this](const PropertyList& p) -> ReturnValue {
+                std::lock_guard<std::mutex> lock(mutex_);
+                pir_threshold_ = p["threshold"].value<int>();
+                ESP_LOGI(TAG, "PIR threshold set to %d", pir_threshold_);
+                return true;
+            });
+
         mcp.AddTool("self.sensor.read_temperature_humidity",
             "Read the ambient temperature and humidity from the DHT11 sensor. "
             "Returns a JSON object with \"temperature\" in Celsius and \"humidity\" in percent.",
@@ -296,7 +428,7 @@ public:
             });
 
         mcp.AddTool("self.peripherals.get_status",
-            "Get the current state of the relay, fan, light, buzzer and the chase animation.",
+            "Get the current state of the relay, fan, light, buzzer, chase animation, PIR light and gas alarm.",
             PropertyList(), [this](const PropertyList&) -> ReturnValue {
                 std::lock_guard<std::mutex> lock(mutex_);
                 cJSON* result = cJSON_CreateObject();
@@ -305,6 +437,8 @@ public:
                 cJSON_AddBoolToObject(result, "light_on", light_on_);
                 cJSON_AddBoolToObject(result, "chase_on", chase_on_);
                 cJSON_AddBoolToObject(result, "buzzer_on", buzzer_on_);
+                cJSON_AddBoolToObject(result, "gas_alarm_on", gas_alarm_on_);
+                cJSON_AddBoolToObject(result, "pir_light_on", pir_light_on_);
                 return result;
             });
 
