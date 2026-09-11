@@ -28,13 +28,13 @@
 
 #define DISPLAY_SPI_HOST         SPI3_HOST
 #define DISPLAY_SPI_MODE         0
-#define DISPLAY_CS_PIN           GPIO_NUM_10
-#define DISPLAY_MOSI_PIN         GPIO_NUM_11
-#define DISPLAY_MISO_PIN         GPIO_NUM_13
+#define DISPLAY_CS_PIN           GPIO_NUM_17   // 预留 CS（老款无 CS 屏不接；换带 CS 屏时接此脚）
+#define DISPLAY_MOSI_PIN         GPIO_NUM_13
+#define DISPLAY_MISO_PIN         GPIO_NUM_NC   // 显示只写不读，MISO 不接
 #define DISPLAY_CLK_PIN          GPIO_NUM_12
-#define DISPLAY_DC_PIN           GPIO_NUM_14
-#define DISPLAY_RST_PIN          GPIO_NUM_39
-#define DISPLAY_BACKLIGHT_PIN    GPIO_NUM_38
+#define DISPLAY_DC_PIN           GPIO_NUM_10
+#define DISPLAY_RST_PIN          GPIO_NUM_11
+#define DISPLAY_BACKLIGHT_PIN    GPIO_NUM_14
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
 #define DISPLAY_WIDTH            480

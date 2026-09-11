@@ -197,8 +197,8 @@ ML307 接线：
 |------|------|------|---------|
 | 麦克风 | GPIO40（WS）/ GPIO42（SCK）/ GPIO41（DIN） | I2S 输入 | 采集语音，采样率 24kHz |
 | 喇叭 | GPIO21（DOUT）/ GPIO47（BCLK）/ GPIO48（LRCK） | I2S 输出 | 播放 TTS 语音与提示音 |
-| 屏幕 | GPIO10（CS）/ GPIO11（MOSI）/ GPIO12（CLK）/ GPIO13（MISO）/ GPIO14（DC） | SPI | ST7796 480×320 显示 |
-| 屏幕 | GPIO39（RST）/ GPIO38（背光） | GPIO | 屏幕复位 / PWM 背光 |
+| 屏幕 | GPIO17（CS，预留）/ GPIO13（MOSI）/ GPIO12（CLK）/ GPIO10（DC） | SPI | ST7796 480×320 显示（老款无 CS 屏不接 CS） |
+| 屏幕 | GPIO11（RST）/ GPIO14（背光） | GPIO | 屏幕复位 / PWM 背光（MISO 不接） |
 | 触摸 | GPIO1（SDA）/ GPIO2（SCL）/ GPIO43（RST）/ GPIO44（INT） | I2C + GPIO | FT5x06 触摸输入 |
 | BOOT 键 | GPIO0 | 输入 | 单击=对话开关；开机双击=切换 Wi-Fi/4G |
 | 继电器 | **GPIO3** | 输出，高电平吸合 | ① 语音 `self.relay.set` ② PIR 有人联动吸合、离开延时断开（默认开启） |
@@ -207,18 +207,19 @@ ML307 接线：
 | 蜂鸣器 | GPIO9 | 输出，高电平响 | ① 语音 `self.buzzer.set` ② 烟雾超标→长鸣报警 |
 | DHT11 温湿度 | GPIO4 | 单总线（需上拉 4.7k~10k） | 语音 `self.sensor.read_temperature_humidity` 查询温湿度 |
 | PIR 人体感应 | GPIO5 | ADC1_CH4 模拟量输入 | 后台任务每 100ms 采样：超阈值→开灯+继电器+问候"主人你好"；离开 15 秒→自动关灯。灵敏度可语音调 `self.pir.set_sensitivity` |
-| MQ-2 烟雾 | GPIO18 | 数字输入 DO，低电平=超标 | 后台任务检测：超标→蜂鸣器长鸣+红灯闪烁；恢复→自动解除。灵敏度由模块电位器调 |
+| MQ-2 烟雾 | GPIO18 | 数字输入 DO，高电平=超标（蓝灯亮） | 后台任务检测：超标→蜂鸣器长鸣+红灯闪烁；恢复→自动解除。灵敏度由模块电位器调 |
 | ML307 4G | GPIO15（TX）/ GPIO16（RX） | UART | Wi-Fi/4G 双网络，同一时间只用一个，开机双击 BOOT 切换 |
 | USB | GPIO19 / GPIO20 | USB | 烧录与日志 |
 | PSRAM | GPIO26~37 | 保留 | 八线 PSRAM，不可用 |
-| 空闲 | GPIO6 / GPIO17 / GPIO46 | - | GPIO46 为 strapping 脚，仅上电采样 |
+| 空闲 | GPIO6 / GPIO46 | - | GPIO6 为最后空闲 ADC1 脚（留作模拟量传感器）；GPIO46 为 strapping 脚，仅上电采样 |
+| 不可用 | GPIO38 / GPIO39 | - | 未引出/不可用 |
 | 不推荐 | GPIO45 | - | VDD_SPI 电压选择脚 |
 
 **自动运行的后台逻辑**（无需语音触发）：
 
 1. **PIR 人体感应**：有人 → 彩灯暖白 + 继电器吸合 + 问候"主人你好"；人离开超过 `PERIPHERAL_PIR_OFF_DELAY_MS`（默认 15 秒）→ 自动熄灯、断开继电器
-2. **MQ-2 烟雾报警**：DO 变低（超标）连续 300ms → 蜂鸣器长鸣 + 彩灯红色闪烁；DO 恢复高电平 → 自动解除报警
-3. **传感器未接不影响语音对话**：PIR 未接读到 0（无人）、MQ-2 未接读到高（不超标）、DHT11 未接返回读取失败，均不会卡死或误触发
+2. **MQ-2 烟雾报警**：DO 变高（超标，蓝灯亮）连续 300ms → 蜂鸣器长鸣 + 彩灯红色闪烁；DO 恢复低电平 → 自动解除报警
+3. **传感器未接不影响语音对话**：PIR 未接读到 0（无人）、MQ-2 未接读到低（不超标）、DHT11 未接返回读取失败，均不会卡死或误触发
 
 #### 使用前提
 
