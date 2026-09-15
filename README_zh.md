@@ -197,7 +197,7 @@ ML307 接线：
 |------|------|------|---------|
 | 麦克风 | GPIO40（WS）/ GPIO42（SCK）/ GPIO41（DIN） | I2S 输入 | 采集语音，采样率 24kHz |
 | 喇叭 | GPIO21（DOUT）/ GPIO47（BCLK）/ GPIO48（LRCK） | I2S 输出 | 播放 TTS 语音与提示音 |
-| 屏幕 | GPIO17（CS，预留）/ GPIO13（MOSI）/ GPIO12（CLK）/ GPIO10（DC） | SPI | ST7796 480×320 显示（老款无 CS 屏不接 CS） |
+| 屏幕 | GPIO6（CS，预留）/ GPIO13（MOSI）/ GPIO12（CLK）/ GPIO10（DC） | SPI | ST7796 480×320 显示（老款无 CS 屏不接 CS） |
 | 屏幕 | GPIO11（RST）/ GPIO14（背光） | GPIO | 屏幕复位 / PWM 背光（MISO 不接） |
 | 触摸 | GPIO1（SDA）/ GPIO2（SCL）/ GPIO43（RST）/ GPIO44（INT） | I2C + GPIO | FT5x06 触摸输入 |
 | BOOT 键 | GPIO0 | 输入 | 单击=对话开关；开机双击=切换 Wi-Fi/4G |
@@ -211,7 +211,7 @@ ML307 接线：
 | ML307 4G | GPIO15（TX）/ GPIO16（RX） | UART | Wi-Fi/4G 双网络，同一时间只用一个，开机双击 BOOT 切换 |
 | USB | GPIO19 / GPIO20 | USB | 烧录与日志 |
 | PSRAM | GPIO26~37 | 保留 | 八线 PSRAM，不可用 |
-| 空闲 | GPIO6 / GPIO46 | - | GPIO6 为最后空闲 ADC1 脚（留作模拟量传感器）；GPIO46 为 strapping 脚，仅上电采样 |
+| 空闲 | GPIO17 / GPIO46 | - | GPIO17 为 ADC2 脚（数字用途可用，模拟量受 Wi-Fi 影响）；GPIO46 为 strapping 脚，仅上电采样 |
 | 不可用 | GPIO38 / GPIO39 | - | 未引出/不可用 |
 | 不推荐 | GPIO45 | - | VDD_SPI 电压选择脚 |
 
