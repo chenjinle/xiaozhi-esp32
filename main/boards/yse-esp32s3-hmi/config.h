@@ -101,4 +101,18 @@
 #define ML307_TX_PIN              GPIO_NUM_15
 #define ML307_RX_PIN              GPIO_NUM_16
 
+// USB UVC 摄像头分辨率（与液晶一致；摄像头不支持时自动回退 320x240@15）
+#define UVC_CAMERA_WIDTH          480
+#define UVC_CAMERA_HEIGHT         320
+#define UVC_CAMERA_FPS            15
+
+// 心知天气（用于顶部信息栏天气显示，签名认证方式）
+// 公钥放 URL（uid），私钥只参与本地 HMAC-SHA1 签名，不出现在 URL 中
+#define WEATHER_ENABLED           1
+#define WEATHER_PUBLIC_KEY        "PHY4qFz23sIaScBRp"
+#define WEATHER_PRIVATE_KEY       "SzxTVA-B5Eh20VTnq"
+#define WEATHER_CITY              "ip"   // "ip"=按设备出口公网IP自动定位；也可填城市名/拼音/城市ID，如 beijing、guangzhou
+#define WEATHER_FALLBACK_CITY     "guangzhou"  // IP 定位失败时使用的默认城市
+#define WEATHER_UPDATE_INTERVAL_MS  (30 * 60 * 1000)  // 30 分钟刷新一次
+
 #endif // _BOARD_CONFIG_H_

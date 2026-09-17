@@ -28,6 +28,7 @@
 //   mq2:    smoke/gas sensor DO input (active low), auto sound & light alarm
 class YsePeripheralControls {
     std::mutex mutex_;
+    std::mutex dht11_mutex_;
     bool relay_on_ = false;
     bool fan_on_ = false;
     bool light_on_ = false;
@@ -301,6 +302,12 @@ class YsePeripheralControls {
     }
 
 public:
+    // 线程安全读取温湿度（信息栏任务与 MCP 语音查询共用）
+    bool ReadTemperatureHumidity(float& temperature, float& humidity) {
+        std::lock_guard<std::mutex> lock(dht11_mutex_);
+        return dht11_.Read(temperature, humidity);
+    }
+
     void Initialize() {
         InitOutput(PERIPHERAL_RELAY_GPIO);
         InitOutput(PERIPHERAL_FAN_GPIO);
@@ -418,7 +425,7 @@ public:
                 float temperature = 0.0f;
                 float humidity = 0.0f;
                 cJSON* result = cJSON_CreateObject();
-                if (dht11_.Read(temperature, humidity)) {
+                if (ReadTemperatureHumidity(temperature, humidity)) {
                     cJSON_AddNumberToObject(result, "temperature", temperature);
                     cJSON_AddNumberToObject(result, "humidity", humidity);
                 } else {

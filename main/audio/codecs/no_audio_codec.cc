@@ -149,6 +149,8 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
     duplex_ = false;
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
+    // 左右双槽都使能时按立体声处理，Write 时 L/R 各复制一份
+    output_channels_ = (spk_slot_mask == (I2S_STD_SLOT_LEFT | I2S_STD_SLOT_RIGHT)) ? 2 : 1;
 
     // Create a new channel for speaker
     i2s_chan_config_t chan_cfg = {
@@ -175,7 +177,7 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
         .slot_cfg = {
             .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
             .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
-            .slot_mode = I2S_SLOT_MODE_MONO,
+            .slot_mode = (output_channels_ == 2) ? I2S_SLOT_MODE_STEREO : I2S_SLOT_MODE_MONO,
             .slot_mask = spk_slot_mask,
             .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
             .ws_pol = false,
@@ -217,25 +219,30 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
 
 int NoAudioCodec::Write(const int16_t* data, int samples) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
-    std::vector<int32_t> buffer(samples);
+    int channels = output_channels_ > 0 ? output_channels_ : 1;
+    std::vector<int32_t> buffer(samples * channels);
 
     // output_volume_: 0-100
     // volume_factor_: 0-65536
     int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;
     for (int i = 0; i < samples; i++) {
         int64_t temp = int64_t(data[i]) * volume_factor; // 使用 int64_t 进行乘法运算
+        int32_t value;
         if (temp > INT32_MAX) {
-            buffer[i] = INT32_MAX;
+            value = INT32_MAX;
         } else if (temp < INT32_MIN) {
-            buffer[i] = INT32_MIN;
+            value = INT32_MIN;
         } else {
-            buffer[i] = static_cast<int32_t>(temp);
+            value = static_cast<int32_t>(temp);
+        }
+        for (int ch = 0; ch < channels; ch++) {
+            buffer[i * channels + ch] = value;  // 双声道时 L/R 填入相同数据
         }
     }
 
     size_t bytes_written;
-    ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY));
-    return bytes_written / sizeof(int32_t);
+    ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * channels * sizeof(int32_t), &bytes_written, portMAX_DELAY));
+    return samples;
 }
 
 int NoAudioCodec::Read(int16_t* dest, int samples) {

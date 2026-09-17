@@ -68,6 +68,7 @@ dependencies:
     - if: target in [esp32s3]
   espressif/adc_battery_estimation: ^0.2.1
   espressif/esp_new_jpeg: ^0.6.1
+  espressif/usb_host_uvc: ^2.2.0
 
   # SenseCAP Watcher Board
   wvirgil123/sscma_client:

@@ -153,10 +153,16 @@ v1 的稳定版本为 1.9.2，可以通过 `git checkout v1` 来切换到 v1 版
 | `self.buzzer.set` | 蜂鸣器开/关 | GPIO9 |
 | `self.sensor.read_temperature_humidity` | 读取 DHT11 温湿度 | GPIO4 |
 | `self.peripherals.get_status` | 查询外设状态 | - |
+| `self.camera.start_preview` | 开启 USB UVC 摄像头并在液晶上实时显示 | USB（GPIO19/20） |
+| `self.camera.stop_preview` | 关闭摄像头监控画面 | USB |
 
 所有板子还提供通用工具，如 `self.get_device_status`、`self.audio_speaker.set_volume`、`self.screen.set_brightness`、`self.camera.take_photo` 等。
 
 小车电机已停用（引脚让给 4G 模块和传感器）。
+
+**USB UVC 摄像头说明**：摄像头插板子 USB 口（GPIO19/20），开机默认不开启；说"打开摄像头/打开监控"才启动并显示画面，说"关闭摄像头"停止。摄像头开启期间 USB 串口/JTAG 不可用（同一物理口），需要烧录/看日志时拔掉摄像头并重启板子即可恢复。
+
+**顶部信息栏**：屏幕顶部常驻显示 日期、时间、温湿度、天气。温湿度来自 DHT11（每 30 秒刷新）；天气来自心知天气 API（每 30 分钟刷新），需在 `config.h` 里把 `WEATHER_API_KEY` 填成你注册的心知天气 key，`WEATHER_CITY` 改成所在城市（拼音/城市名/城市 ID）。
 
 #### 彩灯与传感器接线（yse-esp32s3-hmi）
 

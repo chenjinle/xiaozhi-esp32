@@ -11,6 +11,7 @@
 #include <esp_err.h>
 #include <esp_lvgl_port.h>
 #include <esp_psram.h>
+#include <esp_heap_caps.h>
 #include <cstring>
 #include <src/misc/cache/lv_cache.h>
 
@@ -884,6 +885,13 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_flex_flow(right_icons, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(right_icons, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
+    // 顶部常驻信息栏（日期 时间 温湿度 天气），放在右侧图标左侧，避免与中间状态文字重叠
+    info_label_ = lv_label_create(right_icons);
+    lv_label_set_text(info_label_, "");
+    lv_obj_set_style_text_font(info_label_, text_font, 0);
+    lv_obj_set_style_text_color(info_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_margin_right(info_label_, lvgl_theme->spacing(3), 0);
+
     mute_label_ = lv_label_create(right_icons);
     lv_label_set_text(mute_label_, "");
     lv_obj_set_style_text_font(mute_label_, icon_font, 0);
@@ -906,7 +914,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_pad_bottom(status_bar_, lvgl_theme->spacing(2), 0);
     lv_obj_set_scrollbar_mode(status_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
-    lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);  // Overlap with top_bar_
+    // 状态文字（聆听中/说话中等）显示在屏幕中心表情图案正上方，避免与顶部信息栏/表情重叠
+    // 如需微调改这个数字：越大越靠上
+    lv_obj_align(status_bar_, LV_ALIGN_CENTER, 0, -70);
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_width(notification_label_, LV_HOR_RES * 0.75);
@@ -1070,6 +1080,96 @@ void LcdDisplay::ClearChatMessages() {
     }
 }
 #endif
+
+void LcdDisplay::StartCameraPreview(int width, int height) {
+    DisplayLockGuard lock(this);
+
+    // 清理旧预览
+    if (camera_preview_ != nullptr) {
+        lv_obj_delete(camera_preview_);
+        camera_preview_ = nullptr;
+        camera_preview_img_ = nullptr;
+    }
+    if (camera_preview_buf_ != nullptr) {
+        heap_caps_free(camera_preview_buf_);
+        camera_preview_buf_ = nullptr;
+    }
+
+    camera_preview_w_ = width;
+    camera_preview_h_ = height;
+    camera_preview_buf_ = static_cast<uint8_t*>(heap_caps_malloc(width * height * 2, MALLOC_CAP_SPIRAM));
+    if (camera_preview_buf_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate camera preview buffer (%dx%d)", width, height);
+        return;
+    }
+    memset(camera_preview_buf_, 0, width * height * 2);
+
+    camera_preview_dsc_ = {};
+    camera_preview_dsc_.header.magic = LV_IMAGE_HEADER_MAGIC;
+    camera_preview_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+    camera_preview_dsc_.header.w = width;
+    camera_preview_dsc_.header.h = height;
+    camera_preview_dsc_.header.stride = width * 2;
+    camera_preview_dsc_.data_size = width * height * 2;
+    camera_preview_dsc_.data = camera_preview_buf_;
+
+    // 全屏黑色背景容器
+    camera_preview_ = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(camera_preview_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_pos(camera_preview_, 0, 0);
+    lv_obj_set_style_bg_color(camera_preview_, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(camera_preview_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(camera_preview_, 0, 0);
+    lv_obj_set_scrollbar_mode(camera_preview_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_remove_flag(camera_preview_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(camera_preview_, LV_OBJ_FLAG_CLICKABLE);
+
+    // 画面居中，按屏幕尺寸缩放
+    camera_preview_img_ = lv_image_create(camera_preview_);
+    lv_image_set_src(camera_preview_img_, &camera_preview_dsc_);
+    lv_coord_t zoom_w = (LV_HOR_RES * 256) / width;
+    lv_coord_t zoom_h = (LV_VER_RES * 256) / height;
+    lv_coord_t zoom = (zoom_w < zoom_h) ? zoom_w : zoom_h;
+    if (zoom > 256) zoom = 256;
+    lv_image_set_scale(camera_preview_img_, zoom);
+    lv_obj_center(camera_preview_img_);
+
+    ESP_LOGI(TAG, "Camera preview started (%dx%d)", width, height);
+}
+
+void LcdDisplay::UpdateCameraPreview(const uint8_t* rgb565_data, int width, int height) {
+    DisplayLockGuard lock(this);
+    if (camera_preview_img_ == nullptr || camera_preview_buf_ == nullptr) {
+        return;
+    }
+    if (width != camera_preview_w_ || height != camera_preview_h_) {
+        return;
+    }
+    memcpy(camera_preview_buf_, rgb565_data, width * height * 2);
+    lv_obj_invalidate(camera_preview_img_);
+}
+
+void LcdDisplay::StopCameraPreview() {
+    DisplayLockGuard lock(this);
+    if (camera_preview_ != nullptr) {
+        lv_obj_delete(camera_preview_);
+        camera_preview_ = nullptr;
+        camera_preview_img_ = nullptr;
+    }
+    if (camera_preview_buf_ != nullptr) {
+        heap_caps_free(camera_preview_buf_);
+        camera_preview_buf_ = nullptr;
+    }
+    camera_preview_w_ = 0;
+    camera_preview_h_ = 0;
+}
+
+void LcdDisplay::SetInfoPanelText(const char* text) {
+    DisplayLockGuard lock(this);
+    if (info_label_ != nullptr) {
+        lv_label_set_text(info_label_, text == nullptr ? "" : text);
+    }
+}
 
 void LcdDisplay::SetEmotion(const char* emotion) {
     if (!setup_ui_called_) {

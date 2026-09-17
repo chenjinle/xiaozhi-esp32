@@ -36,6 +36,17 @@ protected:
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
 
+    // 摄像头实时预览（UVC 等）
+    lv_obj_t* camera_preview_ = nullptr;
+    lv_obj_t* camera_preview_img_ = nullptr;
+    lv_image_dsc_t camera_preview_dsc_ = {};
+    uint8_t* camera_preview_buf_ = nullptr;
+    int camera_preview_w_ = 0;
+    int camera_preview_h_ = 0;
+
+    // 顶部常驻信息栏（日期 时间 温湿度 天气）
+    lv_obj_t* info_label_ = nullptr;
+
     void InitializeLcdThemes();
     virtual bool Lock(int timeout_ms = 0) override;
     virtual void Unlock() override;
@@ -56,6 +67,14 @@ public:
     
     // Set whether to hide chat messages/subtitles
     void SetHideSubtitle(bool hide);
+
+    // 摄像头实时预览（视频流）
+    void StartCameraPreview(int width, int height);
+    void UpdateCameraPreview(const uint8_t* rgb565_data, int width, int height);
+    void StopCameraPreview();
+
+    // 顶部信息栏（日期 时间 温湿度 天气）
+    void SetInfoPanelText(const char* text);
 };
 
 // SPI LCD display

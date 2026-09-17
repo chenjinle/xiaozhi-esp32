@@ -7,18 +7,31 @@
 #include "peripheral_controls.h"
 #include "led/single_led.h"
 #include "esp32_camera.h"
+#include "mcp_server.h"
+#include "uvc_camera.h"
 
 #include <cstdio>
+#include <cstring>
+#include <ctime>
+#include <string>
 
+#include <cJSON.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_master.h>
+#include <esp_crt_bundle.h>
+#include <esp_http_client.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_st7796.h>
 #include <esp_lcd_touch_ft5x06.h>
 #include <esp_log.h>
 #include <esp_lvgl_port.h>
+#include <esp_timer.h>
 #include <esp_vfs_fat.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <mbedtls/base64.h>
+#include <mbedtls/md.h>
 #include <sdmmc_cmd.h>
 #include <driver/sdmmc_host.h>
 
@@ -31,6 +44,195 @@ private:
     YsePeripheralControls peripheral_controls_;
     LcdDisplay* display_ = nullptr;
     Esp32Camera* camera_ = nullptr;
+    YseUvcCamera* uvc_camera_ = nullptr;
+
+    // 顶部信息栏状态
+    TaskHandle_t info_panel_task_ = nullptr;
+    float info_temp_ = 0.0f;
+    float info_humidity_ = 0.0f;
+    bool info_dht_valid_ = false;
+    std::string weather_text_;
+
+    // 请求指定 location 的天气，成功返回 true 并更新 weather_text_
+    bool FetchWeatherOnce(const char* location) {
+        time_t ts = time(nullptr);
+        if (ts < 1600000000) return false;  // 尚未校时
+
+        char params[256];
+        snprintf(params, sizeof(params),
+                 "language=zh-Hans&location=%s&ts=%lld&uid=%s&unit=c",
+                 location, (long long)ts, WEATHER_PUBLIC_KEY);
+
+        // HMAC-SHA1(私钥, params) -> Base64
+        uint8_t digest[20];
+        mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA1),
+                        reinterpret_cast<const uint8_t*>(WEATHER_PRIVATE_KEY), strlen(WEATHER_PRIVATE_KEY),
+                        reinterpret_cast<const uint8_t*>(params), strlen(params),
+                        digest);
+        size_t b64_len = 0;
+        uint8_t b64[64] = {};
+        mbedtls_base64_encode(b64, sizeof(b64), &b64_len, digest, sizeof(digest));
+        std::string sig(reinterpret_cast<char*>(b64), b64_len);
+
+        // URL 编码 sig
+        static const char* hex = "0123456789ABCDEF";
+        std::string sig_encoded;
+        for (char c : sig) {
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                c == '-' || c == '_' || c == '.' || c == '~') {
+                sig_encoded += c;
+            } else {
+                sig_encoded += '%';
+                sig_encoded += hex[(c >> 4) & 0xF];
+                sig_encoded += hex[c & 0xF];
+            }
+        }
+
+        char url[512];
+        snprintf(url, sizeof(url), "https://api.seniverse.com/v3/weather/now.json?%s&sig=%s",
+                 params, sig_encoded.c_str());
+
+        esp_http_client_config_t cfg = {};
+        cfg.url = url;
+        cfg.timeout_ms = 10000;
+        cfg.buffer_size = 1024;
+        cfg.crt_bundle_attach = esp_crt_bundle_attach;
+
+        esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        if (client == nullptr) return false;
+
+        bool ok = false;
+        esp_err_t err = esp_http_client_open(client, 0);
+        if (err == ESP_OK && esp_http_client_fetch_headers(client) >= 0) {
+            std::string response;
+            char buf[256];
+            int read;
+            while ((read = esp_http_client_read(client, buf, sizeof(buf) - 1)) > 0) {
+                buf[read] = '\0';
+                response += buf;
+                if (response.size() > 4096) break;
+            }
+
+            cJSON* root = cJSON_Parse(response.c_str());
+            if (root != nullptr) {
+                cJSON* results = cJSON_GetObjectItem(root, "results");
+                if (results != nullptr && cJSON_GetArraySize(results) > 0) {
+                    cJSON* now = cJSON_GetObjectItem(cJSON_GetArrayItem(results, 0), "now");
+                    if (now != nullptr) {
+                        cJSON* text = cJSON_GetObjectItem(now, "text");
+                        cJSON* temp = cJSON_GetObjectItem(now, "temperature");
+                        if (cJSON_IsString(text) && cJSON_IsString(temp)) {
+                            weather_text_ = std::string(text->valuestring) + " " + temp->valuestring + "C";
+                            ok = true;
+                        }
+                    }
+                }
+                cJSON_Delete(root);
+            }
+        }
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+
+        if (ok) {
+            ESP_LOGI(TAG, "Weather updated (location=%s): %s", location, weather_text_.c_str());
+        } else {
+            ESP_LOGW(TAG, "Weather query failed (location=%s)", location);
+        }
+        return ok;
+    }
+
+    void FetchWeather() {
+#if WEATHER_ENABLED
+        // 优先按设备出口 IP 自动定位；失败则用默认城市兜底
+        if (!FetchWeatherOnce(WEATHER_CITY)) {
+            FetchWeatherOnce(WEATHER_FALLBACK_CITY);
+        }
+#endif
+    }
+
+    void InfoPanelTask() {
+        int dht_counter = 29;  // 首次立即读温湿度
+        int64_t last_weather_ms = 0;
+
+        while (true) {
+            time_t now = time(nullptr);
+            struct tm tm_info;
+            localtime_r(&now, &tm_info);
+
+            char time_str[64];
+            if (now < 1600000000) {  // 服务器尚未校时
+                snprintf(time_str, sizeof(time_str), "--:--");
+            } else {
+                snprintf(time_str, sizeof(time_str), "%02d-%02d %02d:%02d",
+                         tm_info.tm_mon + 1, tm_info.tm_mday, tm_info.tm_hour, tm_info.tm_min);
+            }
+
+            if (++dht_counter >= 30) {  // 每 30 秒读一次 DHT11
+                dht_counter = 0;
+                float t = 0.0f, h = 0.0f;
+                info_dht_valid_ = peripheral_controls_.ReadTemperatureHumidity(t, h);
+                if (info_dht_valid_) {
+                    info_temp_ = t;
+                    info_humidity_ = h;
+                }
+            }
+
+            int64_t now_ms = esp_timer_get_time() / 1000;
+            if (now_ms - last_weather_ms >= WEATHER_UPDATE_INTERVAL_MS) {
+                last_weather_ms = now_ms;
+                FetchWeather();
+            }
+
+            std::string text = time_str;
+            if (info_dht_valid_) {
+                char buf[32];
+                snprintf(buf, sizeof(buf), "  %.1fC %.0f%%", info_temp_, info_humidity_);
+                text += buf;
+            }
+            if (!weather_text_.empty()) {
+                text += "  ";
+                text += weather_text_;
+            }
+
+            if (display_ != nullptr) {
+                display_->SetInfoPanelText(text.c_str());
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+
+    void RegisterUvcCameraTools() {
+        auto& mcp = McpServer::GetInstance();
+
+        mcp.AddTool("self.camera.start_preview",
+            "Turn on the USB UVC camera and show the live view on the LCD screen. "
+            "Note: while the camera is on, the USB console is unavailable until reboot.",
+            PropertyList(), [this](const PropertyList&) -> ReturnValue {
+                if (uvc_camera_ == nullptr) {
+                    return std::string("camera not initialized");
+                }
+                esp_err_t err = uvc_camera_->Start();
+                if (err != ESP_OK) {
+                    cJSON* result = cJSON_CreateObject();
+                    cJSON_AddBoolToObject(result, "success", false);
+                    cJSON_AddStringToObject(result, "error", esp_err_to_name(err));
+                    return result;
+                }
+                cJSON* result = cJSON_CreateObject();
+                cJSON_AddBoolToObject(result, "success", true);
+                return result;
+            });
+
+        mcp.AddTool("self.camera.stop_preview",
+            "Turn off the USB UVC camera and stop the live view on the LCD screen.",
+            PropertyList(), [this](const PropertyList&) -> ReturnValue {
+                if (uvc_camera_ != nullptr) {
+                    uvc_camera_->Stop();
+                }
+                return true;
+            });
+    }
 
     void InitializeI2c() {
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -221,6 +423,11 @@ public:
         InitializeSdCard();
         InitializeButtons();
         peripheral_controls_.Initialize();
+        uvc_camera_ = new YseUvcCamera(display_);
+        RegisterUvcCameraTools();
+        xTaskCreate([](void* arg) {
+            static_cast<YseEsp32s3Hmi*>(arg)->InfoPanelTask();
+        }, "info_panel", 4096, this, 5, &info_panel_task_);
         // InitializeCamera();  // 暂时注释：SCCB与触摸共用I2C_NUM_1导致冲突
         if (GetBacklight() != nullptr) {
             GetBacklight()->RestoreBrightness();
@@ -239,7 +446,8 @@ public:
             AUDIO_I2S_SPK_GPIO_BCLK,
             AUDIO_I2S_SPK_GPIO_LRCK,
             AUDIO_I2S_SPK_GPIO_DOUT,
-            I2S_STD_SLOT_RIGHT,  // NS4168 CTRL is pulled high: right channel.
+            // 两颗 NS4168 共用同一组 I2S：SEL=GND 播放左槽，SEL=VDD 播放右槽
+            (i2s_std_slot_mask_t)(I2S_STD_SLOT_LEFT | I2S_STD_SLOT_RIGHT),
             AUDIO_I2S_MIC_GPIO_SCK,
             AUDIO_I2S_MIC_GPIO_WS,
             AUDIO_I2S_MIC_GPIO_DIN,
