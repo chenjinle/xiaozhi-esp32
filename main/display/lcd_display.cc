@@ -885,12 +885,34 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_flex_flow(right_icons, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(right_icons, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    // 顶部常驻信息栏（日期 时间 温湿度 天气），放在右侧图标左侧，避免与中间状态文字重叠
-    info_label_ = lv_label_create(right_icons);
-    lv_label_set_text(info_label_, "");
-    lv_obj_set_style_text_font(info_label_, text_font, 0);
-    lv_obj_set_style_text_color(info_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_margin_right(info_label_, lvgl_theme->spacing(3), 0);
+    // 顶部常驻信息栏：时间 | 温度图标 温湿度 | 天气图标 天气（分段显示）
+    info_time_label_ = lv_label_create(right_icons);
+    lv_label_set_text(info_time_label_, "");
+    lv_obj_set_style_text_font(info_time_label_, text_font, 0);
+    lv_obj_set_style_text_color(info_time_label_, lvgl_theme->text_color(), 0);
+
+    info_temp_icon_label_ = lv_label_create(right_icons);
+    lv_label_set_text(info_temp_icon_label_, FONT_AWESOME_TEMPERATURE_HALF);
+    lv_obj_set_style_text_font(info_temp_icon_label_, icon_font, 0);
+    lv_obj_set_style_text_color(info_temp_icon_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_margin_left(info_temp_icon_label_, lvgl_theme->spacing(3), 0);
+
+    info_th_label_ = lv_label_create(right_icons);
+    lv_label_set_text(info_th_label_, "");
+    lv_obj_set_style_text_font(info_th_label_, text_font, 0);
+    lv_obj_set_style_text_color(info_th_label_, lvgl_theme->text_color(), 0);
+
+    info_weather_icon_label_ = lv_label_create(right_icons);
+    lv_label_set_text(info_weather_icon_label_, FONT_AWESOME_CLOUD_SUN);
+    lv_obj_set_style_text_font(info_weather_icon_label_, icon_font, 0);
+    lv_obj_set_style_text_color(info_weather_icon_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_margin_left(info_weather_icon_label_, lvgl_theme->spacing(3), 0);
+
+    info_weather_label_ = lv_label_create(right_icons);
+    lv_label_set_text(info_weather_label_, "");
+    lv_obj_set_style_text_font(info_weather_label_, text_font, 0);
+    lv_obj_set_style_text_color(info_weather_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_margin_right(info_weather_label_, lvgl_theme->spacing(3), 0);
 
     mute_label_ = lv_label_create(right_icons);
     lv_label_set_text(mute_label_, "");
@@ -1164,10 +1186,16 @@ void LcdDisplay::StopCameraPreview() {
     camera_preview_h_ = 0;
 }
 
-void LcdDisplay::SetInfoPanelText(const char* text) {
+void LcdDisplay::SetInfoPanel(const char* time_text, const char* th_text, const char* weather_text) {
     DisplayLockGuard lock(this);
-    if (info_label_ != nullptr) {
-        lv_label_set_text(info_label_, text == nullptr ? "" : text);
+    if (info_time_label_ != nullptr) {
+        lv_label_set_text(info_time_label_, time_text == nullptr ? "" : time_text);
+    }
+    if (info_th_label_ != nullptr) {
+        lv_label_set_text(info_th_label_, th_text == nullptr ? "" : th_text);
+    }
+    if (info_weather_label_ != nullptr) {
+        lv_label_set_text(info_weather_label_, weather_text == nullptr ? "" : weather_text);
     }
 }
 

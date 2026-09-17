@@ -45,7 +45,11 @@ protected:
     int camera_preview_h_ = 0;
 
     // 顶部常驻信息栏（日期 时间 温湿度 天气）
-    lv_obj_t* info_label_ = nullptr;
+    lv_obj_t* info_time_label_ = nullptr;
+    lv_obj_t* info_temp_icon_label_ = nullptr;
+    lv_obj_t* info_th_label_ = nullptr;
+    lv_obj_t* info_weather_icon_label_ = nullptr;
+    lv_obj_t* info_weather_label_ = nullptr;
 
     void InitializeLcdThemes();
     virtual bool Lock(int timeout_ms = 0) override;
@@ -73,8 +77,8 @@ public:
     void UpdateCameraPreview(const uint8_t* rgb565_data, int width, int height);
     void StopCameraPreview();
 
-    // 顶部信息栏（日期 时间 温湿度 天气）
-    void SetInfoPanelText(const char* text);
+    // 顶部信息栏（时间、温湿度、天气 分段显示）
+    void SetInfoPanel(const char* time_text, const char* th_text, const char* weather_text);
 };
 
 // SPI LCD display

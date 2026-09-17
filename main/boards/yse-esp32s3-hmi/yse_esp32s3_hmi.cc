@@ -52,6 +52,7 @@ private:
     float info_humidity_ = 0.0f;
     bool info_dht_valid_ = false;
     std::string weather_text_;
+    bool weather_ok_ = false;
 
     // 请求指定 location 的天气，成功返回 true 并更新 weather_text_
     bool FetchWeatherOnce(const char* location) {
@@ -144,9 +145,11 @@ private:
     void FetchWeather() {
 #if WEATHER_ENABLED
         // 优先按设备出口 IP 自动定位；失败则用默认城市兜底
-        if (!FetchWeatherOnce(WEATHER_CITY)) {
-            FetchWeatherOnce(WEATHER_FALLBACK_CITY);
+        bool ok = FetchWeatherOnce(WEATHER_CITY);
+        if (!ok) {
+            ok = FetchWeatherOnce(WEATHER_FALLBACK_CITY);
         }
+        weather_ok_ = ok;
 #endif
     }
 
@@ -178,24 +181,20 @@ private:
             }
 
             int64_t now_ms = esp_timer_get_time() / 1000;
-            if (now_ms - last_weather_ms >= WEATHER_UPDATE_INTERVAL_MS) {
+            // 天气查询失败/未校时时每分钟重试一次，成功后按 30 分钟刷新
+            int64_t weather_interval = weather_ok_ ? (int64_t)WEATHER_UPDATE_INTERVAL_MS : 60000;
+            if (now_ms - last_weather_ms >= weather_interval) {
                 last_weather_ms = now_ms;
                 FetchWeather();
             }
 
-            std::string text = time_str;
+            char th_str[32] = "";
             if (info_dht_valid_) {
-                char buf[32];
-                snprintf(buf, sizeof(buf), "  %.1fC %.0f%%", info_temp_, info_humidity_);
-                text += buf;
-            }
-            if (!weather_text_.empty()) {
-                text += "  ";
-                text += weather_text_;
+                snprintf(th_str, sizeof(th_str), "%.1fC %.0f%%", info_temp_, info_humidity_);
             }
 
             if (display_ != nullptr) {
-                display_->SetInfoPanelText(text.c_str());
+                display_->SetInfoPanel(time_str, th_str, weather_text_.c_str());
             }
 
             vTaskDelay(pdMS_TO_TICKS(1000));
