@@ -78,21 +78,22 @@ esp_err_t YseUvcCamera::Start() {
     stream_config.usb.vid = UVC_HOST_ANY_VID;
     stream_config.usb.pid = UVC_HOST_ANY_PID;
     stream_config.usb.uvc_stream_index = 0;
-    stream_config.vs_format.format = UVC_VS_FORMAT_MJPEG;
     stream_config.advanced.frame_size = 0;       // 自动按协商结果分配
     stream_config.advanced.number_of_frame_buffers = 2;
     stream_config.advanced.number_of_urbs = 2;
     stream_config.advanced.urb_size = 10 * 1024;
     stream_config.advanced.frame_heap_caps = MALLOC_CAP_SPIRAM;
 
-    // 优先按液晶分辨率请求，摄像头不支持时自动回退 320x240
+    // 优先按液晶分辨率请求 MJPEG；不支持则回退 320x240 MJPEG；再回退 YUY2
     struct {
         uint16_t width;
         uint16_t height;
         uint16_t fps;
+        uvc_host_stream_format format;
     } modes[] = {
-        {UVC_CAMERA_WIDTH, UVC_CAMERA_HEIGHT, UVC_CAMERA_FPS},
-        {320, 240, 15},
+        {UVC_CAMERA_WIDTH, UVC_CAMERA_HEIGHT, UVC_CAMERA_FPS, UVC_VS_FORMAT_MJPEG},
+        {320, 240, 15, UVC_VS_FORMAT_MJPEG},
+        {320, 240, 15, UVC_VS_FORMAT_YUY2},
     };
 
     esp_err_t err = ESP_ERR_NOT_FOUND;
@@ -100,12 +101,18 @@ esp_err_t YseUvcCamera::Start() {
         stream_config.vs_format.h_res = mode.width;
         stream_config.vs_format.v_res = mode.height;
         stream_config.vs_format.fps = mode.fps;
+        stream_config.vs_format.format = mode.format;
         err = uvc_host_stream_open(&stream_config, pdMS_TO_TICKS(5000), &stream_);
         if (err == ESP_OK) {
-            ESP_LOGI(TAG, "UVC camera opened %dx%d@%d", mode.width, mode.height, mode.fps);
+            current_width_ = mode.width;
+            current_height_ = mode.height;
+            current_is_mjpeg_ = (mode.format == UVC_VS_FORMAT_MJPEG);
+            ESP_LOGI(TAG, "UVC camera opened %dx%d@%d format=%s", mode.width, mode.height, mode.fps,
+                     current_is_mjpeg_ ? "MJPEG" : "YUY2");
             break;
         }
-        ESP_LOGW(TAG, "UVC open %dx%d@%d failed: %s", mode.width, mode.height, mode.fps, esp_err_to_name(err));
+        ESP_LOGW(TAG, "UVC open %dx%d@%d format=%s failed: %s", mode.width, mode.height, mode.fps,
+                 mode.format == UVC_VS_FORMAT_MJPEG ? "MJPEG" : "YUY2", esp_err_to_name(err));
     }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "No supported UVC mode found");
@@ -186,55 +193,98 @@ void YseUvcCamera::DecodeTask() {
             continue;
         }
 
-        jpeg_dec_config_t dec_cfg = DEFAULT_JPEG_DEC_CONFIG();
-        dec_cfg.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;
+        if (current_is_mjpeg_) {
+            // MJPEG：解码成 RGB565
+            jpeg_dec_config_t dec_cfg = DEFAULT_JPEG_DEC_CONFIG();
+            dec_cfg.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;
 
-        jpeg_dec_handle_t dec = nullptr;
-        if (jpeg_dec_open(&dec_cfg, &dec) != JPEG_ERR_OK) {
-            uvc_host_frame_return(stream_, frame);
-            continue;
-        }
-
-        jpeg_dec_io_t io = {};
-        io.inbuf = frame->data;
-        io.inbuf_len = frame->data_len;
-
-        jpeg_dec_header_info_t info = {};
-        if (jpeg_dec_parse_header(dec, &io, &info) != JPEG_ERR_OK) {
-            jpeg_dec_close(dec);
-            uvc_host_frame_return(stream_, frame);
-            continue;
-        }
-
-        int out_len = 0;
-        jpeg_dec_get_outbuf_len(dec, &out_len);
-        if (decode_buf_size_ < out_len) {
-            if (decode_buf_ != nullptr) {
-                jpeg_free_align(decode_buf_);
-                decode_buf_ = nullptr;
+            jpeg_dec_handle_t dec = nullptr;
+            if (jpeg_dec_open(&dec_cfg, &dec) != JPEG_ERR_OK) {
+                uvc_host_frame_return(stream_, frame);
+                continue;
             }
-            decode_buf_ = static_cast<uint8_t*>(jpeg_calloc_align(out_len, 16));
-            decode_buf_size_ = (decode_buf_ != nullptr) ? out_len : 0;
-        }
-        if (decode_buf_ == nullptr) {
-            jpeg_dec_close(dec);
-            uvc_host_frame_return(stream_, frame);
-            continue;
-        }
 
-        io.outbuf = decode_buf_;
-        io.out_size = out_len;
-        if (jpeg_dec_process(dec, &io) == JPEG_ERR_OK) {
-            if (display_ != nullptr) {
-                if (!preview_started_) {
-                    display_->StartCameraPreview(info.width, info.height);
-                    preview_started_ = true;
+            jpeg_dec_io_t io = {};
+            io.inbuf = frame->data;
+            io.inbuf_len = frame->data_len;
+
+            jpeg_dec_header_info_t info = {};
+            if (jpeg_dec_parse_header(dec, &io, &info) != JPEG_ERR_OK) {
+                jpeg_dec_close(dec);
+                uvc_host_frame_return(stream_, frame);
+                continue;
+            }
+
+            int out_len = 0;
+            jpeg_dec_get_outbuf_len(dec, &out_len);
+            if (decode_buf_size_ < out_len) {
+                if (decode_buf_ != nullptr) {
+                    jpeg_free_align(decode_buf_);
+                    decode_buf_ = nullptr;
                 }
-                display_->UpdateCameraPreview(decode_buf_, info.width, info.height);
+                decode_buf_ = static_cast<uint8_t*>(jpeg_calloc_align(out_len, 16));
+                decode_buf_size_ = (decode_buf_ != nullptr) ? out_len : 0;
+            }
+            if (decode_buf_ == nullptr) {
+                jpeg_dec_close(dec);
+                uvc_host_frame_return(stream_, frame);
+                continue;
+            }
+
+            io.outbuf = decode_buf_;
+            io.out_size = out_len;
+            if (jpeg_dec_process(dec, &io) == JPEG_ERR_OK) {
+                if (display_ != nullptr) {
+                    if (!preview_started_) {
+                        display_->StartCameraPreview(info.width, info.height);
+                        preview_started_ = true;
+                    }
+                    display_->UpdateCameraPreview(decode_buf_, info.width, info.height);
+                }
+            }
+            jpeg_dec_close(dec);
+        } else {
+            // YUY2：直接转成 RGB565
+            int pixels = current_width_ * current_height_;
+            int rgb_size = pixels * 2;
+            if (decode_buf_size_ < rgb_size) {
+                if (decode_buf_ != nullptr) {
+                    heap_caps_free(decode_buf_);
+                    decode_buf_ = nullptr;
+                }
+                decode_buf_ = static_cast<uint8_t*>(heap_caps_malloc(rgb_size, MALLOC_CAP_SPIRAM));
+                decode_buf_size_ = (decode_buf_ != nullptr) ? rgb_size : 0;
+            }
+            if (decode_buf_ != nullptr) {
+                auto* dst = reinterpret_cast<uint16_t*>(decode_buf_);
+                const uint8_t* src = frame->data;
+                for (int i = 0; i < pixels / 2; i++) {
+                    int y0 = src[i * 4 + 0];
+                    int u  = src[i * 4 + 1] - 128;
+                    int y1 = src[i * 4 + 2];
+                    int v  = src[i * 4 + 3] - 128;
+
+                    int r0 = y0 + ((v * 1436) >> 10);
+                    int g0 = y0 - ((u * 352 + v * 731) >> 10);
+                    int b0 = y0 + ((u * 1812) >> 10);
+                    int r1 = y1 + ((v * 1436) >> 10);
+                    int g1 = y1 - ((u * 352 + v * 731) >> 10);
+                    int b1 = y1 + ((u * 1812) >> 10);
+
+                    auto clamp = [](int x) { return x < 0 ? 0 : (x > 255 ? 255 : x); };
+                    dst[i * 2 + 0] = static_cast<uint16_t>(((clamp(r0) >> 3) << 11) | ((clamp(g0) >> 2) << 5) | (clamp(b0) >> 3));
+                    dst[i * 2 + 1] = static_cast<uint16_t>(((clamp(r1) >> 3) << 11) | ((clamp(g1) >> 2) << 5) | (clamp(b1) >> 3));
+                }
+                if (display_ != nullptr) {
+                    if (!preview_started_) {
+                        display_->StartCameraPreview(current_width_, current_height_);
+                        preview_started_ = true;
+                    }
+                    display_->UpdateCameraPreview(decode_buf_, current_width_, current_height_);
+                }
             }
         }
 
-        jpeg_dec_close(dec);
         uvc_host_frame_return(stream_, frame);
     }
     vTaskDelete(nullptr);

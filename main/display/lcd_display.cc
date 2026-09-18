@@ -22,6 +22,9 @@
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 LV_FONT_DECLARE(font_awesome_30_4);
+#ifdef CONFIG_BOARD_TYPE_YSE_ESP32S3_HMI
+LV_FONT_DECLARE(font_puhui_basic_30_4);
+#endif
 
 void LcdDisplay::InitializeLcdThemes() {
     auto text_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_TEXT_FONT);
@@ -815,6 +818,13 @@ void LcdDisplay::SetupUI() {
     auto text_font = lvgl_theme->text_font()->font();
     auto icon_font = lvgl_theme->icon_font()->font();
     auto large_icon_font = lvgl_theme->large_icon_font()->font();
+#ifdef CONFIG_BOARD_TYPE_YSE_ESP32S3_HMI
+    auto info_text_font = &font_puhui_basic_30_4;
+    auto info_icon_font = &font_awesome_30_4;
+#else
+    auto info_text_font = text_font;
+    auto info_icon_font = icon_font;
+#endif
 
     auto screen = lv_screen_active();
     lv_obj_set_style_text_font(screen, text_font, 0);
@@ -884,33 +894,37 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_pad_all(right_icons, 0, 0);
     lv_obj_set_flex_flow(right_icons, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(right_icons, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+#ifdef CONFIG_BOARD_TYPE_YSE_ESP32S3_HMI
+    // Keep the enlarged 30 px information clear of the Wi-Fi icon.
+    lv_obj_set_style_translate_x(right_icons, 16, 0);
+#endif
 
     // 顶部常驻信息栏：时间 | 温度图标 温湿度 | 天气图标 天气（分段显示）
     info_time_label_ = lv_label_create(right_icons);
     lv_label_set_text(info_time_label_, "");
-    lv_obj_set_style_text_font(info_time_label_, text_font, 0);
+    lv_obj_set_style_text_font(info_time_label_, info_text_font, 0);
     lv_obj_set_style_text_color(info_time_label_, lvgl_theme->text_color(), 0);
 
     info_temp_icon_label_ = lv_label_create(right_icons);
     lv_label_set_text(info_temp_icon_label_, FONT_AWESOME_TEMPERATURE_HALF);
-    lv_obj_set_style_text_font(info_temp_icon_label_, icon_font, 0);
+    lv_obj_set_style_text_font(info_temp_icon_label_, info_icon_font, 0);
     lv_obj_set_style_text_color(info_temp_icon_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_margin_left(info_temp_icon_label_, lvgl_theme->spacing(3), 0);
 
     info_th_label_ = lv_label_create(right_icons);
     lv_label_set_text(info_th_label_, "");
-    lv_obj_set_style_text_font(info_th_label_, text_font, 0);
+    lv_obj_set_style_text_font(info_th_label_, info_text_font, 0);
     lv_obj_set_style_text_color(info_th_label_, lvgl_theme->text_color(), 0);
 
     info_weather_icon_label_ = lv_label_create(right_icons);
     lv_label_set_text(info_weather_icon_label_, FONT_AWESOME_CLOUD_SUN);
-    lv_obj_set_style_text_font(info_weather_icon_label_, icon_font, 0);
+    lv_obj_set_style_text_font(info_weather_icon_label_, info_icon_font, 0);
     lv_obj_set_style_text_color(info_weather_icon_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_margin_left(info_weather_icon_label_, lvgl_theme->spacing(3), 0);
 
     info_weather_label_ = lv_label_create(right_icons);
     lv_label_set_text(info_weather_label_, "");
-    lv_obj_set_style_text_font(info_weather_label_, text_font, 0);
+    lv_obj_set_style_text_font(info_weather_label_, info_text_font, 0);
     lv_obj_set_style_text_color(info_weather_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_margin_right(info_weather_label_, lvgl_theme->spacing(3), 0);
 
@@ -1199,6 +1213,22 @@ void LcdDisplay::SetInfoPanel(const char* time_text, const char* th_text, const 
     }
 }
 
+void LcdDisplay::SetIdleAnimation(const uint8_t* data, size_t size) {
+    idle_gif_data_ = data;
+    idle_gif_size_ = size;
+}
+
+void LcdDisplay::SetIdleMode(bool idle) {
+    idle_mode_ = idle;
+    if (!idle) {
+        DisplayLockGuard lock(this);
+        if (gif_controller_) {
+            gif_controller_->Stop();
+            gif_controller_.reset();
+        }
+    }
+}
+
 void LcdDisplay::SetEmotion(const char* emotion) {
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetEmotion('%s') called before SetupUI() - emotion will not be displayed!", emotion);
@@ -1208,6 +1238,30 @@ void LcdDisplay::SetEmotion(const char* emotion) {
             ESP_LOGW(TAG, "SetEmotion('%s') failed: emoji_image_ is nullptr (SetupUI() was called but emoji image not created)", emotion);
         }
         return;
+    }
+
+    const bool neutral = emotion != nullptr && emotion[0] == 'n' && emotion[1] == 'e' &&
+        emotion[2] == 'u' && emotion[3] == 't' && emotion[4] == 'r' &&
+        emotion[5] == 'a' && emotion[6] == 'l' && emotion[7] == '\0';
+    if (idle_mode_ && idle_gif_data_ != nullptr && idle_gif_size_ > 0 && neutral) {
+        lv_img_dsc_t dsc = {};
+        dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+        dsc.header.cf = LV_COLOR_FORMAT_RAW_ALPHA;
+        dsc.data = idle_gif_data_;
+        dsc.data_size = idle_gif_size_;
+        DisplayLockGuard lock(this);
+        gif_controller_ = std::make_unique<LvglGif>(&dsc);
+        if (gif_controller_->IsLoaded()) {
+            gif_controller_->SetFrameCallback([this]() {
+                lv_image_set_src(emoji_image_, gif_controller_->image_dsc());
+            });
+            lv_image_set_src(emoji_image_, gif_controller_->image_dsc());
+            gif_controller_->Start();
+            lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+            return;
+        }
+        gif_controller_.reset();
     }
 
     auto emoji_collection = static_cast<LvglTheme*>(current_theme_)->emoji_collection();

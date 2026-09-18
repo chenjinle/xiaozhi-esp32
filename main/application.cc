@@ -864,6 +864,7 @@ void Application::HandleStateChangedEvent() {
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
     auto led = board.GetLed();
+    display->SetIdleMode(new_state == kDeviceStateIdle);
     led->OnStateChanged();
     
     switch (new_state) {
@@ -1128,4 +1129,3 @@ void Application::ResetProtocol() {
         protocol_.reset();
     });
 }
-

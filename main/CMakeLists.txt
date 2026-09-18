@@ -1036,6 +1036,14 @@ if(BOARD_TYPE STREQUAL "m5stack-stick-s3")
         m5stack__m5pm1
     )
 endif()
+set(MAIN_EMBED_FILES_EXTRA)
+if(CONFIG_BOARD_TYPE_YSE_ESP32S3_HMI)
+    set(YSE_IDLE_GIF_SOURCE ${CMAKE_SOURCE_DIR}/managed_components/78__xiaozhi-fonts/gif/noto-emoji_128/neutral.gif)
+    set(YSE_IDLE_GIF ${CMAKE_CURRENT_BINARY_DIR}/idle.gif)
+    configure_file(${YSE_IDLE_GIF_SOURCE} ${YSE_IDLE_GIF} COPYONLY)
+    list(APPEND MAIN_EMBED_FILES_EXTRA ${YSE_IDLE_GIF})
+endif()
+
 if(CONFIG_BOARD_TYPE_ESP_VOCAT)
     list(APPEND MAIN_PRIV_REQUIRES_EXTRA
         espressif__touch_slider_sensor
@@ -1044,7 +1052,7 @@ if(CONFIG_BOARD_TYPE_ESP_VOCAT)
 endif()
 
 idf_component_register(SRCS ${SOURCES}
-                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
+                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${MAIN_EMBED_FILES_EXTRA}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES

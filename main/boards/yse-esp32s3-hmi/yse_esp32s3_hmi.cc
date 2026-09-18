@@ -37,6 +37,9 @@
 
 #define TAG "YseEsp32s3Hmi"
 
+extern const uint8_t _binary_idle_gif_start[];
+extern const uint8_t _binary_idle_gif_end[];
+
 class YseEsp32s3Hmi : public DualNetworkBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
@@ -216,6 +219,11 @@ private:
                     cJSON* result = cJSON_CreateObject();
                     cJSON_AddBoolToObject(result, "success", false);
                     cJSON_AddStringToObject(result, "error", esp_err_to_name(err));
+                    if (err == ESP_ERR_NOT_FOUND) {
+                        cJSON_AddStringToObject(result, "hint",
+                            "USB上没有检测到摄像头。请检查：1 摄像头供电是否足够，建议外部5V供电；"
+                            "2 OTG转接线是否接好；3 摄像头是否支持UVC协议。");
+                    }
                     return result;
                 }
                 cJSON* result = cJSON_CreateObject();
@@ -287,6 +295,8 @@ private:
         display_ = new SpiLcdDisplay(panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                      DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
                                      DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        display_->SetIdleAnimation(_binary_idle_gif_start,
+                                   static_cast<size_t>(_binary_idle_gif_end - _binary_idle_gif_start));
     }
 
     void InitializeTouch() {
@@ -426,7 +436,7 @@ public:
         RegisterUvcCameraTools();
         xTaskCreate([](void* arg) {
             static_cast<YseEsp32s3Hmi*>(arg)->InfoPanelTask();
-        }, "info_panel", 4096, this, 5, &info_panel_task_);
+        }, "info_panel", 10240, this, 5, &info_panel_task_);  // 栈加大：HTTPS/TLS 握手需要较大栈
         // InitializeCamera();  // 暂时注释：SCCB与触摸共用I2C_NUM_1导致冲突
         if (GetBacklight() != nullptr) {
             GetBacklight()->RestoreBrightness();

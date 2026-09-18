@@ -37,4 +37,7 @@ private:
     bool preview_started_ = false;
     uint8_t* decode_buf_ = nullptr;
     int decode_buf_size_ = 0;
+    int current_width_ = 0;
+    int current_height_ = 0;
+    bool current_is_mjpeg_ = true;
 };

@@ -30,6 +30,9 @@ protected:
     lv_obj_t* emoji_label_ = nullptr;
     lv_obj_t* emoji_image_ = nullptr;
     std::unique_ptr<LvglGif> gif_controller_ = nullptr;
+    const uint8_t* idle_gif_data_ = nullptr;
+    size_t idle_gif_size_ = 0;
+    bool idle_mode_ = false;
     lv_obj_t* emoji_box_ = nullptr;
     lv_obj_t* chat_message_label_ = nullptr;
     esp_timer_handle_t preview_timer_ = nullptr;
@@ -62,6 +65,7 @@ protected:
 public:
     ~LcdDisplay();
     virtual void SetEmotion(const char* emotion) override;
+    virtual void SetIdleMode(bool idle) override;
     virtual void SetChatMessage(const char* role, const char* content) override;
     virtual void ClearChatMessages() override;
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
@@ -79,6 +83,9 @@ public:
 
     // 顶部信息栏（时间、温湿度、天气 分段显示）
     void SetInfoPanel(const char* time_text, const char* th_text, const char* weather_text);
+
+    // Configure a board-specific GIF which is shown only while the device is idle.
+    void SetIdleAnimation(const uint8_t* data, size_t size);
 };
 
 // SPI LCD display
